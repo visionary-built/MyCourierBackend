@@ -26,7 +26,8 @@ const verifyToken = (token) => {
 
 // CORS middleware
 app.use(cors({
-  origin: ['http://localhost:3000', 'https://tezlift-kappa.vercel.app'],
+  // origin: ['http://localhost:3000', 'https://tezlift-kappa.vercel.app'],
+  origin: 'http://localhost:3000',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']

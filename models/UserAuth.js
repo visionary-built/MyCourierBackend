@@ -23,6 +23,11 @@ const UserAuthSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
     },
+    role: {
+        type: String,
+        enum: ['superAdmin', 'admin', 'operation', 'operationPortal', 'codClient', 'codClientPortal', 'customer', 'rider'],
+        default: 'customer'
+    },
     isFreeAccess: {
         type: Boolean,
         default: false,

@@ -66,10 +66,23 @@ const handleUploadError = (err, req, res, next) => {
 
 
 
+const adminController = require('../controllers/adminController');
+const { adminAuth, superAdminAuth } = require('../middleware/auth');
+
 router.post('/admin-login', auth.adminLogin);
 router.post('/logout', auth.logout);
 
-// Admin Routes - temporarily without authentication for testing
+// User Management Routes
+router.post('/manage/create-user', adminAuth, adminController.createUser);
+router.post('/manage/create-operation-portal', adminAuth, adminController.createOperationPortal);
+router.post('/manage/create-cod-portal', adminAuth, adminController.createCodPortal);
+router.get('/manage/users', adminAuth, adminController.getAllUsers);
+router.delete('/manage/user/:id', superAdminAuth, adminController.deleteUser);
+
+// All subsequent admin routes should be protected by adminAuth
+router.use(adminAuth);
+
+// Admin Routes
 router.post('/customers', customerController.createCustomer);
 router.get('/customers', customerController.getAllCustomers);
 router.get('/customers/:id', customerController.getCustomerById);

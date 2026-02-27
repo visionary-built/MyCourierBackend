@@ -126,34 +126,43 @@ const authenticateAdmin = async (req, res, next) => {
 
 // Admin authentication middleware for admin routes
 const adminAuth = (req, res, next) => {
-  // Only check the Authorization header (Bearer <token>)
   const authHeader = req.headers['authorization'];
   if (!authHeader) {
-    return res.status(401).json({ message: 'No token provided in Authorization header' });
+    return res.status(401).json({ success: false, message: 'No token provided' });
   }
   const parts = authHeader.split(' ');
   if (parts.length !== 2 || parts[0] !== 'Bearer') {
-    return res.status(401).json({ message: 'Malformed Authorization header' });
+    return res.status(401).json({ success: false, message: 'Malformed token' });
   }
   const token = parts[1];
-  if (!token) {
-    return res.status(401).json({ message: 'No token found in Authorization header' });
-  }
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    if (decoded.role !== 'admin') {
-      return res.status(403).json({ message: 'Not an admin' });
+    // Allow superAdmin, admin, operation, and codClient for general admin routes
+    const allowedRoles = ['superAdmin', 'admin', 'operation', 'operationPortal', 'codClient', 'codClientPortal'];
+    if (!allowedRoles.includes(decoded.role)) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
     }
     req.user = decoded;
     next();
   } catch (err) {
-    return res.status(401).json({ message: 'Invalid or expired token' });
+    return res.status(401).json({ success: false, message: 'Invalid or expired token' });
   }
+};
+
+// Super Admin only middleware
+const superAdminAuth = (req, res, next) => {
+  adminAuth(req, res, () => {
+    if (!req.user || req.user.role !== 'superAdmin') {
+      return res.status(403).json({ success: false, message: 'Super Admin access required' });
+    }
+    next();
+  });
 };
 
 module.exports = {
   authenticateCustomer,
   authenticateRider,
   authenticateAdmin,
-  adminAuth
-}; 
+  adminAuth,
+  superAdminAuth
+};

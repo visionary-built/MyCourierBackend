@@ -3,27 +3,71 @@ dotenv.config();
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 
+const UserAuth = require('../models/UserAuth');
+
 exports.adminLogin = async (req, res) => {
     try {
         const { email, password } = req.body;
 
         if (!email || !password) {
-            return res.status(400).json({ message: "Email and password are required" });
+            return res.status(400).json({ success: false, message: "Email and password are required" });
         }
 
-        if (email !== process.env.EMAIL) {
-            return res.status(401).json({ message: "Invalid admin credentials" });
-        }
+        // 1. Try to find user in database
+        let user = await UserAuth.findOne({ email });
+        let role = null;
+        let userId = null;
 
-        const passwordMatch = await bcrypt.compare(password, process.env.ADMIN_PASSWORD);
-        if (!passwordMatch) {
-            return res.status(401).json({ message: "Invalid admin credentials" });
+        if (user) {
+            // Check if user has an admin-related role
+            const adminRoles = ['superAdmin', 'admin', 'operation', 'codClient'];
+            if (!adminRoles.includes(user.role)) {
+                return res.status(403).json({ success: false, message: "Not authorized as admin" });
+            }
+
+            const passwordMatch = await bcrypt.compare(password, user.password);
+            if (!passwordMatch) {
+                return res.status(401).json({ success: false, message: "Invalid credentials" });
+            }
+            role = user.role;
+            userId = user._id;
+        } else {
+            // 2. Fallback to .env bootstrap credentials if no user in DB
+            if (email === process.env.EMAIL) {
+                const passwordMatch = await bcrypt.compare(password, process.env.ADMIN_PASSWORD);
+                if (passwordMatch) {
+                    role = "superAdmin";
+                    userId = "bootstrap-admin";
+                    
+                    // Optional: Create the superAdmin user in DB if it doesn't exist
+                    // This ensures the system transitions to DB-only smoothly
+                    try {
+                        const newSuperAdmin = new UserAuth({
+                            email,
+                            password: process.env.ADMIN_PASSWORD, // It's already hashed in .env
+                            fullName: 'System Super Admin',
+                            username: 'superadmin',
+                            role: 'superAdmin',
+                            isAdmin: true
+                        });
+                        await newSuperAdmin.save();
+                        userId = newSuperAdmin._id;
+                    } catch (saveErr) {
+                        console.error('Failed to auto-create bootstrap superAdmin in DB:', saveErr.message);
+                    }
+                } else {
+                    return res.status(401).json({ success: false, message: "Invalid credentials" });
+                }
+            } else {
+                return res.status(401).json({ success: false, message: "Invalid credentials" });
+            }
         }
 
         const token = jwt.sign(
             { 
-                email: process.env.EMAIL, 
-                role: "admin",
+                email, 
+                role,
+                id: userId,
                 timestamp: Date.now()
             },
             process.env.JWT_SECRET,
@@ -38,13 +82,20 @@ exports.adminLogin = async (req, res) => {
         });
 
         return res.json({
-            message: "Admin login successful",
-            token
+            success: true,
+            message: "Login successful",
+            token,
+            role,
+            user: {
+                email,
+                role
+            }
         });
 
     } catch (err) {
         console.error('Admin login error:', err);
         return res.status(500).json({ 
+            success: false,
             message: "Internal server error",
             error: process.env.NODE_ENV === 'development' ? err.message : undefined
         });
