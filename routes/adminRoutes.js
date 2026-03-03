@@ -12,6 +12,7 @@ const deliverySheetPhaseIController = require('../controllers/DeliverySheetPhase
 const returnSheetController = require('../controllers/returnSheetController');
 const manualBookingController = require('../controllers/ManualbookingController');
 const branchController = require('../controllers/branchController');
+const expenseController = require('../controllers/expenseController');
 const voidConsignmentController = require('../controllers/voidConsignmentController');
 const auth = require('../controllers/auth');
 const { getTrackingById, getTrackingByConsignmentNumber, getAllConsignments } = require('../controllers/trackingController');
@@ -154,6 +155,12 @@ router.put('/branches/:id/assign-manager', superAdminAuth, branchController.assi
 router.get('/branches/:id/summary', superAdminAuth, branchController.getBranchSummary);
 router.get('/branches/:id/performance', superAdminAuth, branchController.getBranchPerformance);
 router.get('/branches/:id/revenue', superAdminAuth, branchController.getBranchRevenue);
+
+// Expenses Module (SuperAdmin only)
+router.post('/expense-categories', superAdminAuth, expenseController.createCategory);
+router.get('/expense-categories', superAdminAuth, expenseController.getCategories);
+router.post('/expenses', superAdminAuth, expenseController.createExpense);
+router.get('/expenses/report', superAdminAuth, expenseController.getExpenseReport);
 
 // Void Consignments
 router.get('/void-consignments', voidConsignmentController.getVoidConsignments);

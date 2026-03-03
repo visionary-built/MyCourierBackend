@@ -1,6 +1,8 @@
 const Branch = require('../models/Branch');
 const ManualBooking = require('../models/ManualBooking');
 const BookingStatus = require('../models/bookingStatus');
+const Expense = require('../models/Expense');
+const ExpenseCategory = require('../models/ExpenseCategory');
 
 function buildDateFilter(dateFrom, dateTo) {
   const dateQuery = {};
@@ -206,9 +208,17 @@ exports.getBranchPerformance = async (req, res) => {
       ...(Object.keys(dateQuery).length > 0 && { bookingDate: dateQuery })
     };
 
-    const [manualBookings, bookingStatuses] = await Promise.all([
+    const expenseFilter = {
+      ...(Object.keys(dateQuery).length > 0 && { date: dateQuery }),
+      branch: branch._id
+    };
+
+    const [manualBookings, bookingStatuses, expenses] = await Promise.all([
       ManualBooking.find(bookingFilter).lean(),
-      BookingStatus.find(statusFilter).lean()
+      BookingStatus.find(statusFilter).lean(),
+      Expense.find(expenseFilter)
+        .populate('category', 'name code')
+        .lean()
     ]);
 
     const performance = {
@@ -279,18 +289,30 @@ exports.getBranchRevenue = async (req, res) => {
     const { dateQuery, hasDateFilter } = buildDateFilter(dateFrom, dateTo);
     const cityFilter = buildCityFilter(branch);
 
-    const filter = {
+    const bookingFilter = {
       ...cityFilter,
       ...(Object.keys(dateQuery).length > 0 && { date: dateQuery }),
       status: { $nin: ['cancelled'] }
     };
 
-    const bookings = await ManualBooking.find(filter).lean();
+    const expenseFilter = {
+      ...(Object.keys(dateQuery).length > 0 && { date: dateQuery }),
+      branch: branch._id
+    };
+
+    const [bookings, expenses] = await Promise.all([
+      ManualBooking.find(bookingFilter).lean(),
+      Expense.find(expenseFilter)
+        .populate('category', 'name code')
+        .lean()
+    ]);
 
     const totals = {
       totalShipments: bookings.length,
       totalRevenue: 0,
-      totalCodAmount: 0
+      totalCodAmount: 0,
+      totalExpenses: 0,
+      netRevenue: 0
     };
 
     const paymentBreakdown = {
@@ -323,6 +345,27 @@ exports.getBranchRevenue = async (req, res) => {
       }
     });
 
+    const expensesByCategory = {};
+    expenses.forEach((e) => {
+      const amt = e.amount || 0;
+      totals.totalExpenses += amt;
+
+      const key = e.category ? e.category._id.toString() : 'uncategorized';
+      if (!expensesByCategory[key]) {
+        expensesByCategory[key] = {
+          categoryId: e.category ? e.category._id : null,
+          name: e.category ? e.category.name : 'Uncategorized',
+          code: e.category ? e.category.code : null,
+          total: 0,
+          count: 0
+        };
+      }
+      expensesByCategory[key].total += amt;
+      expensesByCategory[key].count += 1;
+    });
+
+    totals.netRevenue = totals.totalRevenue - totals.totalExpenses;
+
     res.status(200).json({
       success: true,
       message: 'Branch revenue report retrieved successfully',
@@ -339,7 +382,8 @@ exports.getBranchRevenue = async (req, res) => {
         },
         dateFilterApplied: hasDateFilter,
         totals,
-        paymentBreakdown
+        paymentBreakdown,
+        expensesByCategory: Object.values(expensesByCategory)
       }
     });
   } catch (error) {
@@ -418,7 +462,9 @@ exports.getBranchSummary = async (req, res) => {
     const totals = {
       totalShipments: manualBookings.length,
       totalRevenue: 0,
-      totalCodAmount: 0
+      totalCodAmount: 0,
+      totalExpenses: 0,
+      netRevenue: 0
     };
 
     const paymentBreakdown = {
@@ -451,6 +497,27 @@ exports.getBranchSummary = async (req, res) => {
       }
     });
 
+    const expensesByCategory = {};
+    expenses.forEach((e) => {
+      const amt = e.amount || 0;
+      totals.totalExpenses += amt;
+
+      const key = e.category ? e.category._id.toString() : 'uncategorized';
+      if (!expensesByCategory[key]) {
+        expensesByCategory[key] = {
+          categoryId: e.category ? e.category._id : null,
+          name: e.category ? e.category.name : 'Uncategorized',
+          code: e.category ? e.category.code : null,
+          total: 0,
+          count: 0
+        };
+      }
+      expensesByCategory[key].total += amt;
+      expensesByCategory[key].count += 1;
+    });
+
+    totals.netRevenue = totals.totalRevenue - totals.totalExpenses;
+
     res.status(200).json({
       success: true,
       message: 'Branch summary retrieved successfully',
@@ -468,7 +535,8 @@ exports.getBranchSummary = async (req, res) => {
         dateFilterApplied: hasDateFilter,
         performance,
         totals,
-        paymentBreakdown
+        paymentBreakdown,
+        expensesByCategory: Object.values(expensesByCategory)
       }
     });
   } catch (error) {

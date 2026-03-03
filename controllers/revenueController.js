@@ -1,5 +1,6 @@
 const ManualBooking = require('../models/ManualBooking');
 const Customer = require('../models/Customer');
+const Expense = require('../models/Expense');
 
 function buildDateFilter(dateFrom, dateTo) {
   const dateQuery = {};
@@ -53,12 +54,17 @@ exports.getRevenueSummary = async (req, res) => {
     const { dateFrom, dateTo } = req.query;
     const { filter, hasDateFilter } = buildDateFilter(dateFrom, dateTo);
 
-    const bookings = await ManualBooking.find(filter).lean();
+    const [bookings, expenses] = await Promise.all([
+      ManualBooking.find(filter).lean(),
+      Expense.find(filter).lean()
+    ]);
 
     const totals = {
       totalShipments: bookings.length,
       totalRevenue: 0,
-      totalCodAmount: 0
+      totalCodAmount: 0,
+      totalExpenses: 0,
+      netRevenue: 0
     };
 
     const paymentBreakdown = {
@@ -90,6 +96,12 @@ exports.getRevenueSummary = async (req, res) => {
         paymentBreakdown.nonCod.revenueCharges += charges;
       }
     });
+
+    expenses.forEach((e) => {
+      totals.totalExpenses += e.amount || 0;
+    });
+
+    totals.netRevenue = totals.totalRevenue - totals.totalExpenses;
 
     res.status(200).json({
       success: true,
