@@ -22,6 +22,7 @@ const qsrReportController = require('../controllers/qsrReportController');
 const revenueController = require('../controllers/revenueController');
 const salesController = require('../controllers/salesController');
 const invoiceController = require('../controllers/invoiceController');
+const monitoringController = require('../controllers/monitoringController');
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -212,6 +213,10 @@ router.get('/invoice/generate', invoiceController.generateInvoice);
 router.get('/invoice/generate-rider', invoiceController.generateRiderInvoice);
 router.get('/invoice', invoiceController.getAllInvoices);
 
-
+// Monitoring Routes (Operations & Sales)
+router.post('/monitoring/targets', superAdminAuth, monitoringController.setSalesTarget);
+router.get('/monitoring/targets', superAdminAuth, monitoringController.getSalesTargets);
+router.get('/monitoring/target-vs-achieved', superAdminAuth, monitoringController.getTargetVsAchieved);
+router.get('/monitoring/rider-performance', superAdminAuth, monitoringController.getRiderPerformance);
 
 module.exports = router;
