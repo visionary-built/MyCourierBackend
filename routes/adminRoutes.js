@@ -13,6 +13,7 @@ const returnSheetController = require('../controllers/returnSheetController');
 const manualBookingController = require('../controllers/ManualbookingController');
 const branchController = require('../controllers/branchController');
 const expenseController = require('../controllers/expenseController');
+const payrollController = require('../controllers/payrollController');
 const voidConsignmentController = require('../controllers/voidConsignmentController');
 const auth = require('../controllers/auth');
 const { getTrackingById, getTrackingByConsignmentNumber, getAllConsignments } = require('../controllers/trackingController');
@@ -161,6 +162,14 @@ router.post('/expense-categories', superAdminAuth, expenseController.createCateg
 router.get('/expense-categories', superAdminAuth, expenseController.getCategories);
 router.post('/expenses', superAdminAuth, expenseController.createExpense);
 router.get('/expenses/report', superAdminAuth, expenseController.getExpenseReport);
+
+// Salaries & Payroll (SuperAdmin only)
+router.get('/payroll/employees', superAdminAuth, payrollController.getPayrollEmployees);
+router.post('/payroll/employees', superAdminAuth, payrollController.upsertEmployeePayroll);
+router.post('/payroll/generate', superAdminAuth, payrollController.generatePayroll);
+router.get('/payroll/history', superAdminAuth, payrollController.getPayrollHistory);
+router.put('/payroll/:id', superAdminAuth, payrollController.updatePayrollItem);
+router.get('/payroll/:id/slip', superAdminAuth, payrollController.getPayrollSlip);
 
 // Void Consignments
 router.get('/void-consignments', voidConsignmentController.getVoidConsignments);
