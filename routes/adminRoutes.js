@@ -11,6 +11,7 @@ const bookingStatusController = require('../controllers/BookingStatusController'
 const deliverySheetPhaseIController = require('../controllers/DeliverySheetPhaseI');
 const returnSheetController = require('../controllers/returnSheetController');
 const manualBookingController = require('../controllers/ManualbookingController');
+const branchController = require('../controllers/branchController');
 const voidConsignmentController = require('../controllers/voidConsignmentController');
 const auth = require('../controllers/auth');
 const { getTrackingById, getTrackingByConsignmentNumber, getAllConsignments } = require('../controllers/trackingController');
@@ -145,6 +146,15 @@ router.delete("/manual-booking/:id", manualBookingController.deleteBooking);
 router.post("/manual-booking/bulk-import", upload.single('excelFile'), handleUploadError, manualBookingController.bulkImportBookings);
 
     
+// Branch (Express Centre) Management - SuperAdmin only
+router.post('/branches', superAdminAuth, branchController.createBranch);
+router.get('/branches', superAdminAuth, branchController.getBranches);
+router.put('/branches/:id', superAdminAuth, branchController.updateBranch);
+router.put('/branches/:id/assign-manager', superAdminAuth, branchController.assignManager);
+router.get('/branches/:id/summary', superAdminAuth, branchController.getBranchSummary);
+router.get('/branches/:id/performance', superAdminAuth, branchController.getBranchPerformance);
+router.get('/branches/:id/revenue', superAdminAuth, branchController.getBranchRevenue);
+
 // Void Consignments
 router.get('/void-consignments', voidConsignmentController.getVoidConsignments);
 router.post('/void-consignments/void', voidConsignmentController.voidConsignment);
