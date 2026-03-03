@@ -22,6 +22,7 @@ const qsrReportController = require('../controllers/qsrReportController');
 const revenueController = require('../controllers/revenueController');
 const salesController = require('../controllers/salesController');
 const invoiceController = require('../controllers/invoiceController');
+const overnightServiceController = require('../controllers/overnightServiceController');
 const monitoringController = require('../controllers/monitoringController');
 
 // Configure multer for file uploads
@@ -218,5 +219,9 @@ router.post('/monitoring/targets', superAdminAuth, monitoringController.setSales
 router.get('/monitoring/targets', superAdminAuth, monitoringController.getSalesTargets);
 router.get('/monitoring/target-vs-achieved', superAdminAuth, monitoringController.getTargetVsAchieved);
 router.get('/monitoring/rider-performance', superAdminAuth, monitoringController.getRiderPerformance);
+
+// Overnight Service Routes
+router.get('/services/overnight/config', superAdminAuth, overnightServiceController.getOvernightConfig);
+router.post('/services/overnight/calculate', superAdminAuth, overnightServiceController.calculateOvernightRate);
 
 module.exports = router;

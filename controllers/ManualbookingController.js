@@ -21,7 +21,7 @@ exports.createBooking = async (req, res) => {
       customerReferenceNo,
       pieces,
       fragile,
-      deliveryCharges,
+      deliveryCharges: initialDeliveryCharges,
       productDetail,
       remarks
     } = req.body;
@@ -58,6 +58,19 @@ exports.createBooking = async (req, res) => {
       });
     }
 
+    // Overnight Pricing and Priority Engine
+    let finalDeliveryCharges = Number(initialDeliveryCharges) || 0;
+    let isOvernight = false;
+    let priorityHandling = false;
+    let estimatedDeliveryDays = 3;
+
+    if (serviceType === 'overnight') {
+      finalDeliveryCharges = finalDeliveryCharges * 1.5; // 50% Higher Rate
+      isOvernight = true;
+      priorityHandling = true;
+      estimatedDeliveryDays = 1; // Fast delivery (next day)
+    }
+
     const newBooking = new ManualBooking({
       customerId: finalCustomerId,
       createdBy,
@@ -74,9 +87,12 @@ exports.createBooking = async (req, res) => {
       customerReferenceNo,
       pieces,
       fragile,
-      deliveryCharges,
+      deliveryCharges: finalDeliveryCharges,
       productDetail,
-      remarks
+      remarks,
+      isOvernight,
+      priorityHandling,
+      estimatedDeliveryDays
     });
 
     await newBooking.save();
@@ -224,7 +240,8 @@ exports.updateBooking = async (req, res) => {
       'serviceType', 'originCity', 'destinationCity', 'consigneeName',
       'consigneeMobile', 'consigneeEmail', 'consigneeAddress', 'date',
       'weight', 'codAmount', 'customerReferenceNo', 'pieces', 'fragile',
-      'deliveryCharges', 'productDetail', 'remarks', 'status'
+      'deliveryCharges', 'productDetail', 'remarks', 'status',
+      'isOvernight', 'priorityHandling', 'estimatedDeliveryDays'
     ];
 
     if (req.user.role !== "admin" && req.user.role !== "superAdmin") {

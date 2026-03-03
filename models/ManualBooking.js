@@ -19,6 +19,12 @@ const ManualBookingSchema = new mongoose.Schema({
   deliveryCharges: { type: Number, default: 0 },
   productDetail: { type: String },
   remarks: { type: String },
+  
+  // Overnight Service Additions
+  isOvernight: { type: Boolean, default: false },
+  priorityHandling: { type: Boolean, default: false },
+  estimatedDeliveryDays: { type: Number, default: 3 }, // 1 for overnight, 3-5 standard
+  
   consignmentNo: { type: String, unique: true },
   status: {
     type: String,
