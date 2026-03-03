@@ -164,3 +164,133 @@ exports.deleteUser = async (req, res) => {
         res.status(500).json({ success: false, message: "Internal server error" });
     }
 };
+
+/**
+ * Update an existing user's details (SuperAdmin & Admin only)
+ */
+exports.updateUser = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const {
+            fullName,
+            username,
+            email,
+            password,
+            role,
+            phoneNumber
+        } = req.body;
+
+        const updaterRole = req.user.role;
+
+        // Only superAdmin and admin can update users
+        if (!['superAdmin', 'admin'].includes(updaterRole)) {
+            return res.status(403).json({
+                success: false,
+                message: "Access denied"
+            });
+        }
+
+        const userToUpdate = await UserAuth.findById(id);
+        if (!userToUpdate) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
+        // Prevent non-superAdmin from modifying superAdmin/admin accounts
+        if (
+            updaterRole === 'admin' &&
+            ['superAdmin', 'admin'].includes(userToUpdate.role)
+        ) {
+            return res.status(403).json({
+                success: false,
+                message: "Admins cannot modify Super Admin or Admin accounts"
+            });
+        }
+
+        // Validate role if provided
+        const allowedRoles = ['admin', 'operation', 'operationPortal', 'codClient', 'codClientPortal', 'superAdmin'];
+        if (role && !allowedRoles.includes(role)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid role specified"
+            });
+        }
+
+        // Admins can only assign certain roles
+        if (
+            updaterRole === 'admin' &&
+            role &&
+            !['operationPortal', 'codClientPortal'].includes(role)
+        ) {
+            return res.status(403).json({
+                success: false,
+                message: "Admins can only assign Operation Portal and COD Client Portal roles"
+            });
+        }
+
+        // Ensure email/username are unique if changed
+        if (email || username) {
+            const conflictQuery = {
+                _id: { $ne: id },
+                $or: []
+            };
+            if (email) conflictQuery.$or.push({ email });
+            if (username) conflictQuery.$or.push({ username });
+
+            if (conflictQuery.$or.length > 0) {
+                const existing = await UserAuth.findOne(conflictQuery);
+                if (existing) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Another user with this email or username already exists"
+                    });
+                }
+            }
+        }
+
+        // Apply updates
+        if (typeof fullName !== 'undefined') userToUpdate.fullName = fullName;
+        if (typeof username !== 'undefined') userToUpdate.username = username;
+        if (typeof email !== 'undefined') userToUpdate.email = email;
+        if (typeof phoneNumber !== 'undefined') userToUpdate.phoneNumber = phoneNumber;
+
+        if (password) {
+            userToUpdate.password = await bcrypt.hash(password, 10);
+        }
+
+        if (role) {
+            // Only superAdmin can promote/demote to/from admin/superAdmin
+            if (
+                updaterRole !== 'superAdmin' &&
+                ['admin', 'superAdmin'].includes(role)
+            ) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Only Super Admin can assign Admin or Super Admin roles"
+                });
+            }
+            userToUpdate.role = role;
+            userToUpdate.isAdmin = ['superAdmin', 'admin'].includes(role);
+        }
+
+        await userToUpdate.save();
+
+        const sanitizedUser = userToUpdate.toObject();
+        delete sanitizedUser.password;
+
+        res.json({
+            success: true,
+            message: "User updated successfully",
+            user: sanitizedUser
+        });
+    } catch (error) {
+        console.error('Update user error:', error);
+        res.status(500).json({
+            success: false,
+            message: "Internal server error",
+            error: error.message
+        });
+    }
+};

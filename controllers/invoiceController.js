@@ -838,7 +838,218 @@ exports.getAvailableRiders = async (req, res) => {
     }
 };
 
+// Generate COD Client Invoice
+exports.generateCodClientInvoice = async (req, res) => {
+    try {
+        const { dateFrom, dateTo, format = 'json' } = req.query;
+
+        if (!dateFrom || !dateTo) {
+            return res.status(400).json({
+                success: false,
+                message: 'Date From and Date To are required.'
+            });
+        }
+
+        const startDate = new Date(dateFrom);
+        const endDate = new Date(dateTo);
+        endDate.setDate(endDate.getDate() + 1);
+
+        const dateQuery = {
+            $gte: startDate,
+            $lt: endDate
+        };
+
+        const manualBookings = await ManualBooking.find({
+            $and: [
+                { status: { $nin: ['cancelled'] } },
+                { $or: [{ date: dateQuery }, { deliveryDate: dateQuery }] },
+                { customerId: String(req.user._id) }
+            ]
+        }).lean();
+
+        const billableConsignments = [];
+
+        manualBookings.forEach(booking => {
+            billableConsignments.push({
+                consignmentNumber: booking.consignmentNo,
+                source: 'manual_booking',
+                bookingDate: booking.date,
+                deliveryDate: booking.deliveryDate,
+                destinationCity: booking.destinationCity,
+                originCity: booking.originCity,
+                consigneeName: booking.consigneeName,
+                consigneeAddress: booking.consigneeAddress,
+                pieces: booking.pieces || 1,
+                weight: booking.weight || 0,
+                codAmount: booking.codAmount || 0,
+                status: booking.status,
+                referenceNo: booking.customerReferenceNo,
+                deliveryCharges: calculateDeliveryCharges(booking.weight || 0, booking.destinationCity),
+                remarks: booking.remarks
+            });
+        });
+
+        billableConsignments.sort((a, b) => new Date(a.bookingDate) - new Date(b.bookingDate));
+
+        const totals = calculateInvoiceTotals(billableConsignments);
+        
+        // Add GST and Net Payable calculations specific for COD Client
+        const taxRate = 0.16; // 16% GST assumption
+        const gst = Math.round(totals.totalDeliveryCharges * taxRate);
+        const netPayable = totals.totalCodAmount - (totals.totalDeliveryCharges + gst);
+
+        const invoiceNumber = generateInvoiceNumber(`COD-${req.user._id.toString().substring(0, 4)}`, startDate);
+
+        const invoiceData = {
+            invoiceNumber,
+            agent: {
+                accountNo: `COD-${req.user._id.toString().substring(0, 6)}`,
+                name: req.user.fullName || req.user.username,
+                address: 'N/A',
+                contactNo: req.user.phoneNumber || 'N/A',
+                email: req.user.email
+            },
+            dateRange: {
+                from: startDate,
+                to: new Date(dateTo)
+            },
+            generatedDate: new Date(),
+            consignments: billableConsignments,
+            totals: {
+                ...totals,
+                gst,
+                netPayable
+            },
+            summary: {
+                totalConsignments: billableConsignments.length,
+                totalPieces: totals.totalPieces,
+                totalWeight: totals.totalWeight,
+                totalCodAmount: totals.totalCodAmount,
+                totalDeliveryCharges: totals.totalDeliveryCharges,
+                gst: gst,
+                netPayable: netPayable,
+                grandTotal: totals.grandTotal + gst
+            }
+        };
+
+        if (format === 'json') {
+            return res.status(200).json({
+                success: true,
+                message: 'COD Client Invoice generated successfully',
+                data: invoiceData
+            });
+        } else if (format === 'pdf') {
+            return generateCodClientPDFInvoice(res, invoiceData);
+        } else {
+            return res.status(400).json({
+                success: false,
+                message: 'Unsupported format. Use "pdf" or "json".'
+            });
+        }
+
+    } catch (error) {
+        console.error('Error generating COD client invoice:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while generating invoice',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Helper function to generate PDF invoice for COD Client
+function generateCodClientPDFInvoice(res, invoiceData) {
+    const doc = new PDFDocument({ margin: 50 });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=invoice-${invoiceData.invoiceNumber}.pdf`);
+    doc.pipe(res);
+    doc.fontSize(20).font('Helvetica-Bold').text('TEZLIFT COURIER SERVICE', { align: 'center' });
+    doc.fontSize(12).font('Helvetica').text('123 Shipping St, City, Country', { align: 'center' });
+    doc.fontSize(10).text('Phone: +92-XXX-XXXXXXX | Email: info@tezlift.com', { align: 'center' });
+    doc.moveDown(1);
+
+    doc.fontSize(16).font('Helvetica-Bold').text('COD CLIENT INVOICE', { align: 'center' });
+    doc.moveDown(0.5);
+
+    doc.fontSize(10).font('Helvetica');
+    doc.text(`Invoice Number: ${invoiceData.invoiceNumber}`, 50, doc.y);
+    doc.text(`Generated Date: ${invoiceData.generatedDate.toLocaleDateString()}`, 300, doc.y);
+    doc.moveDown(0.5);
+
+    doc.text(`Client Name: ${invoiceData.agent.name}`, 50, doc.y);
+    doc.text(`Email: ${invoiceData.agent.email}`, 300, doc.y);
+    doc.moveDown(0.5);
+    doc.text(`Contact: ${invoiceData.agent.contactNo}`, 50, doc.y);
+    doc.moveDown(1);
+
+    doc.text(`Period: ${invoiceData.dateRange.from.toLocaleDateString()} to ${invoiceData.dateRange.to.toLocaleDateString()}`, 50, doc.y);
+    doc.moveDown(1);
+
+    const tableTop = doc.y;
+    doc.font('Helvetica-Bold').fontSize(9);
+    doc.text('Sr#', 50, tableTop);
+    doc.text('Consignment', 80, tableTop);
+    doc.text('Date', 180, tableTop);
+    doc.text('Destination', 250, tableTop);
+    doc.text('Pieces', 320, tableTop);
+    doc.text('Weight', 370, tableTop);
+    doc.text('COD', 420, tableTop);
+    doc.text('Charges', 470, tableTop);
+
+    doc.moveTo(50, tableTop - 5).lineTo(520, tableTop - 5).stroke();
+    doc.moveTo(50, tableTop + 15).lineTo(520, tableTop + 15).stroke();
+
+    let currentY = tableTop + 20;
+    doc.font('Helvetica').fontSize(8);
+
+    invoiceData.consignments.forEach((consignment, index) => {
+        if (currentY > 700) {
+            doc.addPage();
+            currentY = 50;
+        }
+
+        doc.text((index + 1).toString(), 50, currentY);
+        doc.text(consignment.consignmentNumber, 80, currentY);
+        doc.text(consignment.bookingDate.toLocaleDateString(), 180, currentY);
+        doc.text(consignment.destinationCity, 250, currentY);
+        doc.text(consignment.pieces.toString(), 320, currentY);
+        doc.text(consignment.weight.toString(), 370, currentY);
+        doc.text(consignment.codAmount.toString(), 420, currentY);
+        doc.text(consignment.deliveryCharges.toString(), 470, currentY);
+
+        currentY += 15;
+    });
+
+    doc.moveTo(50, currentY).lineTo(520, currentY).stroke();
+
+    doc.moveDown(1);
+    doc.font('Helvetica-Bold').fontSize(10);
+    doc.text('Summary:', 50, doc.y);
+    doc.moveDown(0.5);
+    doc.font('Helvetica').fontSize(9);
+    doc.text(`Total Bookings: ${invoiceData.summary.totalConsignments}`, 50, doc.y);
+    doc.text(`Total Pieces: ${invoiceData.summary.totalPieces}`, 300, doc.y);
+    doc.moveDown(0.5);
+    doc.text(`Total Weight: ${invoiceData.summary.totalWeight} kg`, 50, doc.y);
+    doc.text(`Total COD Amount: Rs. ${invoiceData.summary.totalCodAmount}`, 300, doc.y);
+    doc.moveDown(0.5);
+    doc.text(`Total Delivery Charges: Rs. ${invoiceData.summary.totalDeliveryCharges}`, 50, doc.y);
+    doc.text(`GST (16%): Rs. ${invoiceData.summary.gst}`, 300, doc.y);
+    doc.moveDown(1);
+    doc.fontSize(12).font('Helvetica-Bold');
+    doc.text(`Total Charges (inc. GST): Rs. ${invoiceData.summary.grandTotal}`, 50, doc.y);
+    doc.text(`NET PAYABLE: Rs. ${invoiceData.summary.netPayable}`, 300, doc.y);
+
+    doc.moveDown(2);
+    doc.font('Helvetica-Oblique').fontSize(8).text('Thank you for choosing TEZLIFT COURIER SERVICE', { align: 'center' });
+    doc.text('This is a computer generated invoice', { align: 'center' });
+
+    doc.end();
+}
+
 // Get all invoices (paginated, filterable)
+
 exports.getAllInvoices = async (req, res) => {
     try {
         const {

@@ -16,6 +16,7 @@ const auth = require('../controllers/auth');
 const { getTrackingById, getTrackingByConsignmentNumber, getAllConsignments } = require('../controllers/trackingController');
 const addresslabelController = require('../controllers/addresslabelController');
 const qsrReportController = require('../controllers/qsrReportController');
+const salesController = require('../controllers/salesController');
 const invoiceController = require('../controllers/invoiceController');
 
 // Configure multer for file uploads
@@ -77,6 +78,7 @@ router.post('/manage/create-user', adminAuth, adminController.createUser);
 router.post('/manage/create-operation-portal', adminAuth, adminController.createOperationPortal);
 router.post('/manage/create-cod-portal', adminAuth, adminController.createCodPortal);
 router.get('/manage/users', adminAuth, adminController.getAllUsers);
+router.put('/manage/user/:id', adminAuth, adminController.updateUser);
 router.delete('/manage/user/:id', superAdminAuth, adminController.deleteUser);
 
 // All subsequent admin routes should be protected by adminAuth
@@ -165,6 +167,11 @@ router.get('/report', qsrReportController.getQSRReport);
 router.get('/consignment/:consignmentNumber', qsrReportController.getQSRByConsignment);
 router.get('/summary', qsrReportController.getQSRSummary);
 router.get('/export', qsrReportController.exportQSRReport);
+
+// Sales Management Routes (SuperAdmin only for full visibility)
+router.get('/sales/summary', superAdminAuth, salesController.getSalesSummary);
+router.get('/sales/report', superAdminAuth, salesController.getSalesReport);
+router.get('/sales/export', superAdminAuth, salesController.exportSalesReport);
 
 // Invoice Routes
 router.get('/invoice/customers', invoiceController.getAvailableAgents);

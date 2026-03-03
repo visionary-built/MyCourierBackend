@@ -159,10 +159,54 @@ const superAdminAuth = (req, res, next) => {
   });
 };
 
+// Middleware to verify COD Client Portal token
+const authenticateCodClient = async (req, res, next) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Access token required'
+      });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = decoded.id || decoded._id;
+
+    // Verify user still exists
+    const UserAuth = require('../models/UserAuth');
+    const user = await UserAuth.findById(userId);
+    
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    if (user.role !== 'codClientPortal') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: COD Client Portal only'
+      });
+    }
+
+    req.user = user;
+    next();
+  } catch (error) {
+    return res.status(401).json({
+      success: false,
+      message: 'Invalid token'
+    });
+  }
+};
+
 module.exports = {
   authenticateCustomer,
   authenticateRider,
   authenticateAdmin,
   adminAuth,
-  superAdminAuth
+  superAdminAuth,
+  authenticateCodClient
 };

@@ -31,8 +31,8 @@ exports.createBooking = async (req, res) => {
 
     let finalCustomerId;
     
-    // If customer is creating their own booking, use their ID
-    if (req.user && req.user.role === "customer") {
+    // If customer or codClient is creating their own booking, use their ID
+    if (req.user && (req.user.role === "customer" || req.user.role === "codClientPortal")) {
       finalCustomerId = req.user._id;
     } else if (bodyCustomerId) {
       // If admin is creating booking for a customer
@@ -119,8 +119,8 @@ exports.getAllBookings = async (req, res) => {
   try {
     let query = {};
     
-    // If user is a customer, only show their bookings
-    if (req.user && req.user.role === "customer") {
+    // If user is a customer or codClient, only show their bookings
+    if (req.user && (req.user.role === "customer" || req.user.role === "codClientPortal")) {
       query.customerId = req.user._id;
     }
     
@@ -147,7 +147,7 @@ exports.getBookingById = async (req, res) => {
     const { id } = req.params;
     let query = { _id: id };
 
-    if (req.user.role === "customer") {
+    if (req.user.role === "customer" || req.user.role === "codClientPortal") {
       query.customerId = req.user._id;
     }
 
@@ -177,7 +177,7 @@ exports.getBookingByConsignmentNo = async (req, res) => {
     const { consignmentNo } = req.params;
     let query = { consignmentNo };
 
-    if (req.user.role === "customer") {
+    if (req.user.role === "customer" || req.user.role === "codClientPortal") {
       query.customerId = req.user._id;
     }
 
@@ -207,7 +207,7 @@ exports.updateBooking = async (req, res) => {
     const { id } = req.params;
     let query = { _id: id };
 
-    if (req.user.role === "customer") {
+    if (req.user.role === "customer" || req.user.role === "codClientPortal") {
       query.customerId = req.user._id;
     }
 
@@ -227,7 +227,7 @@ exports.updateBooking = async (req, res) => {
       'deliveryCharges', 'productDetail', 'remarks', 'status'
     ];
 
-    if (req.user.role !== "admin") {
+    if (req.user.role !== "admin" && req.user.role !== "superAdmin") {
       delete req.body.customerId;
       delete req.body.status;
       delete req.body.consignmentNo;
@@ -290,7 +290,7 @@ exports.deleteBooking = async (req, res) => {
     const { id } = req.params;
     let query = { _id: id };
 
-    if (req.user.role === "customer") {
+    if (req.user.role === "customer" || req.user.role === "codClientPortal") {
       query.customerId = req.user._id;
     }
 
@@ -343,8 +343,8 @@ exports.getBookingsWithFilters = async (req, res) => {
 
     let query = {};
 
-    // If user is a customer, only show their bookings
-    if (req.user && req.user.role === "customer") {
+    // If user is a customer or cod client, only show their bookings
+    if (req.user && (req.user.role === "customer" || req.user.role === "codClientPortal")) {
       query.customerId = req.user._id;
     }
     
@@ -414,8 +414,8 @@ exports.bulkImportBookings = async (req, res) => {
     const createdBy = req.user && req.user.role === "customer" ? "customer" : "admin";
     let finalCustomerId;
     
-    // If customer is creating their own bookings, use their ID
-    if (req.user && req.user.role === "customer") {
+    // If customer or cod client is creating their own bookings, use their ID
+    if (req.user && (req.user.role === "customer" || req.user.role === "codClientPortal")) {
       finalCustomerId = req.user._id;
     } else if (req.body.customerId) {
       // If admin is creating bookings for a customer

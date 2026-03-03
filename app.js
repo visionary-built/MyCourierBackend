@@ -72,6 +72,10 @@ app.use('/api/customer', customerRoutes);
 // Rider Routes
 app.use('/api/rider', riderRoutes);
 
+// COD Client Portal Routes
+const codClientPortalRoutes = require('./routes/CodClientPortal');
+app.use('/api/cod-client', codClientPortalRoutes);
+
 // JWT test routes
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
