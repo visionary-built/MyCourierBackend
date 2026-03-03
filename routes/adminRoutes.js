@@ -16,6 +16,7 @@ const auth = require('../controllers/auth');
 const { getTrackingById, getTrackingByConsignmentNumber, getAllConsignments } = require('../controllers/trackingController');
 const addresslabelController = require('../controllers/addresslabelController');
 const qsrReportController = require('../controllers/qsrReportController');
+const revenueController = require('../controllers/revenueController');
 const salesController = require('../controllers/salesController');
 const invoiceController = require('../controllers/invoiceController');
 
@@ -167,6 +168,11 @@ router.get('/report', qsrReportController.getQSRReport);
 router.get('/consignment/:consignmentNumber', qsrReportController.getQSRByConsignment);
 router.get('/summary', qsrReportController.getQSRSummary);
 router.get('/export', qsrReportController.exportQSRReport);
+
+// Revenue Module Routes (SuperAdmin only)
+router.get('/revenue/summary', revenueController.getRevenueSummary);
+router.get('/revenue/clients', superAdminAuth, revenueController.getClientRevenue);
+router.get('/revenue/timeseries', superAdminAuth, revenueController.getRevenueTimeSeries);
 
 // Sales Management Routes (SuperAdmin only for full visibility)
 router.get('/sales/summary', superAdminAuth, salesController.getSalesSummary);
