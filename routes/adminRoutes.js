@@ -23,6 +23,7 @@ const revenueController = require('../controllers/revenueController');
 const salesController = require('../controllers/salesController');
 const invoiceController = require('../controllers/invoiceController');
 const overnightServiceController = require('../controllers/overnightServiceController');
+const giftServiceController = require('../controllers/giftServiceController');
 const monitoringController = require('../controllers/monitoringController');
 
 // Configure multer for file uploads
@@ -223,5 +224,10 @@ router.get('/monitoring/rider-performance', superAdminAuth, monitoringController
 // Overnight Service Routes
 router.get('/services/overnight/config', superAdminAuth, overnightServiceController.getOvernightConfig);
 router.post('/services/overnight/calculate', superAdminAuth, overnightServiceController.calculateOvernightRate);
+
+// Gift Service Routes
+router.get('/services/gift/config', superAdminAuth, giftServiceController.getGiftConfig);
+router.put('/services/gift/config', superAdminAuth, giftServiceController.updateGiftConfig);
+router.get('/services/gift/bookings', superAdminAuth, giftServiceController.getGiftBookings);
 
 module.exports = router;

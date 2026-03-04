@@ -25,6 +25,17 @@ const ManualBookingSchema = new mongoose.Schema({
   priorityHandling: { type: Boolean, default: false },
   estimatedDeliveryDays: { type: Number, default: 3 }, // 1 for overnight, 3-5 standard
   
+  // Gift Service Additions
+  isGift: { type: Boolean, default: false },
+  giftOptions: {
+    specialPackaging: { type: Boolean, default: false },
+    handlingInstructions: { type: String },
+    messageCard: {
+      enabled: { type: Boolean, default: false },
+      message: { type: String }
+    }
+  },
+  
   consignmentNo: { type: String, unique: true },
   status: {
     type: String,

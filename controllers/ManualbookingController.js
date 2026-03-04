@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const ManualBooking = require("../models/ManualBooking");
 const BookingStatus = require("../models/bookingStatus");
 const XLSX = require('xlsx');
+const GiftConfig = require("../models/GiftConfig");
 
 // Create a booking (Admin or Customer)
 exports.createBooking = async (req, res) => {
@@ -23,7 +24,9 @@ exports.createBooking = async (req, res) => {
       fragile,
       deliveryCharges: initialDeliveryCharges,
       productDetail,
-      remarks
+      remarks,
+      isGift,
+      giftOptions
     } = req.body;
 
     // Determine who is creating the booking
@@ -71,6 +74,21 @@ exports.createBooking = async (req, res) => {
       estimatedDeliveryDays = 1; // Fast delivery (next day)
     }
 
+    // Gift Service Logic
+    const giftConfig = await GiftConfig.findOne();
+    const isGiftServiceEnabled = giftConfig ? giftConfig.enabled : false;
+
+    if (isGift && isGiftServiceEnabled) {
+      if (giftOptions) {
+        if (giftOptions.specialPackaging && giftConfig.features.specialPackaging.available) {
+          finalDeliveryCharges += giftConfig.features.specialPackaging.price;
+        }
+        if (giftOptions.messageCard && giftOptions.messageCard.enabled && giftConfig.features.messageCard.available) {
+          finalDeliveryCharges += giftConfig.features.messageCard.price;
+        }
+      }
+    }
+
     const newBooking = new ManualBooking({
       customerId: finalCustomerId,
       createdBy,
@@ -92,7 +110,9 @@ exports.createBooking = async (req, res) => {
       remarks,
       isOvernight,
       priorityHandling,
-      estimatedDeliveryDays
+      estimatedDeliveryDays,
+      isGift: (isGift && isGiftServiceEnabled) || false,
+      giftOptions: (isGift && isGiftServiceEnabled) ? giftOptions : undefined
     });
 
     await newBooking.save();
@@ -241,7 +261,8 @@ exports.updateBooking = async (req, res) => {
       'consigneeMobile', 'consigneeEmail', 'consigneeAddress', 'date',
       'weight', 'codAmount', 'customerReferenceNo', 'pieces', 'fragile',
       'deliveryCharges', 'productDetail', 'remarks', 'status',
-      'isOvernight', 'priorityHandling', 'estimatedDeliveryDays'
+      'isOvernight', 'priorityHandling', 'estimatedDeliveryDays',
+      'isGift', 'giftOptions'
     ];
 
     if (req.user.role !== "admin" && req.user.role !== "superAdmin") {
