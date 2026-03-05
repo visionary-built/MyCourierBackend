@@ -24,6 +24,7 @@ const salesController = require('../controllers/salesController');
 const invoiceController = require('../controllers/invoiceController');
 const overnightServiceController = require('../controllers/overnightServiceController');
 const giftServiceController = require('../controllers/giftServiceController');
+const internationalServiceController = require('../controllers/internationalServiceController');
 const monitoringController = require('../controllers/monitoringController');
 
 // Configure multer for file uploads
@@ -229,5 +230,10 @@ router.post('/services/overnight/calculate', superAdminAuth, overnightServiceCon
 router.get('/services/gift/config', superAdminAuth, giftServiceController.getGiftConfig);
 router.put('/services/gift/config', superAdminAuth, giftServiceController.updateGiftConfig);
 router.get('/services/gift/bookings', superAdminAuth, giftServiceController.getGiftBookings);
+
+// International Service Routes
+router.get('/services/international/config', superAdminAuth, internationalServiceController.getInternationalConfig);
+router.put('/services/international/config', superAdminAuth, internationalServiceController.updateInternationalConfig);
+router.get('/services/international/bookings', superAdminAuth, internationalServiceController.getInternationalBookings);
 
 module.exports = router;

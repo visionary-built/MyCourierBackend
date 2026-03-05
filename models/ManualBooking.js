@@ -35,6 +35,19 @@ const ManualBookingSchema = new mongoose.Schema({
       message: { type: String }
     }
   },
+
+  // International Service Additions
+  isInternational: { type: Boolean, default: false },
+  internationalDetails: {
+    destinationCountry: { type: String },
+    countryCode: { type: String },
+    currency: { type: String, default: 'PKR' },
+    customsDeclaration: {
+      itemDescription: { type: String },
+      declaredValue: { type: Number },
+      hsCode: { type: String }
+    }
+  },
   
   consignmentNo: { type: String, unique: true },
   status: {

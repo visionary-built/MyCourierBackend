@@ -3,6 +3,7 @@ const ManualBooking = require("../models/ManualBooking");
 const BookingStatus = require("../models/bookingStatus");
 const XLSX = require('xlsx');
 const GiftConfig = require("../models/GiftConfig");
+const InternationalConfig = require("../models/InternationalConfig");
 
 // Create a booking (Admin or Customer)
 exports.createBooking = async (req, res) => {
@@ -26,7 +27,9 @@ exports.createBooking = async (req, res) => {
       productDetail,
       remarks,
       isGift,
-      giftOptions
+      giftOptions,
+      isInternational,
+      internationalDetails
     } = req.body;
 
     // Determine who is creating the booking
@@ -89,6 +92,28 @@ exports.createBooking = async (req, res) => {
       }
     }
 
+    // International Service Logic
+    let isInternationalEnabled = false;
+    let internationalConfig = null;
+    if (serviceType === 'international' || (typeof isInternational !== 'undefined' && isInternational)) {
+      internationalConfig = await InternationalConfig.findOne();
+      isInternationalEnabled = internationalConfig ? internationalConfig.enabled : false;
+
+      if (isInternationalEnabled && internationalDetails && internationalDetails.destinationCountry) {
+        const countryData = internationalConfig.countries.find(
+          c => c.countryName.toLowerCase() === internationalDetails.destinationCountry.toLowerCase() || 
+               c.countryCode.toLowerCase() === internationalDetails.destinationCountry.toLowerCase()
+        );
+
+        if (countryData && countryData.isActive) {
+          isInternational = true;
+          // Calculate international rate: Base Rate + (Weight * RatePerKg)
+          finalDeliveryCharges = countryData.baseRate + (weight * countryData.ratePerKg);
+          estimatedDeliveryDays = countryData.estimatedDays || '7-10 Days';
+        }
+      }
+    }
+
     const newBooking = new ManualBooking({
       customerId: finalCustomerId,
       createdBy,
@@ -112,7 +137,9 @@ exports.createBooking = async (req, res) => {
       priorityHandling,
       estimatedDeliveryDays,
       isGift: (isGift && isGiftServiceEnabled) || false,
-      giftOptions: (isGift && isGiftServiceEnabled) ? giftOptions : undefined
+      giftOptions: (isGift && isGiftServiceEnabled) ? giftOptions : undefined,
+      isInternational: (isInternational && isInternationalEnabled) || false,
+      internationalDetails: (isInternational && isInternationalEnabled) ? internationalDetails : undefined
     });
 
     await newBooking.save();
@@ -262,7 +289,7 @@ exports.updateBooking = async (req, res) => {
       'weight', 'codAmount', 'customerReferenceNo', 'pieces', 'fragile',
       'deliveryCharges', 'productDetail', 'remarks', 'status',
       'isOvernight', 'priorityHandling', 'estimatedDeliveryDays',
-      'isGift', 'giftOptions'
+      'isGift', 'giftOptions', 'isInternational', 'internationalDetails'
     ];
 
     if (req.user.role !== "admin" && req.user.role !== "superAdmin") {
