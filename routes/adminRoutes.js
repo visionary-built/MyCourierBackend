@@ -26,6 +26,7 @@ const overnightServiceController = require('../controllers/overnightServiceContr
 const giftServiceController = require('../controllers/giftServiceController');
 const internationalServiceController = require('../controllers/internationalServiceController');
 const monitoringController = require('../controllers/monitoringController');
+const rateCardController = require('../controllers/rateCardController');
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -235,5 +236,11 @@ router.get('/services/gift/bookings', superAdminAuth, giftServiceController.getG
 router.get('/services/international/config', superAdminAuth, internationalServiceController.getInternationalConfig);
 router.put('/services/international/config', superAdminAuth, internationalServiceController.updateInternationalConfig);
 router.get('/services/international/bookings', superAdminAuth, internationalServiceController.getInternationalBookings);
+
+// ─── Global Rate Card / Rates Adjustment ────────────────────────────────────
+router.get('/rate-cards', rateCardController.getAllRateCards);
+router.post('/rate-cards', superAdminAuth, rateCardController.createRateCard);
+router.put('/rate-cards/:id', superAdminAuth, rateCardController.updateRateCard);
+router.delete('/rate-cards/:id', superAdminAuth, rateCardController.deleteRateCard);
 
 module.exports = router;

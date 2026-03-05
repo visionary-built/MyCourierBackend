@@ -1,3 +1,4 @@
+require('dotenv').config();
 const jwt = require('jsonwebtoken');
 const Customer = require('../models/Customer');
 const Rider = require('../models/Rider');
@@ -136,15 +137,25 @@ const adminAuth = (req, res, next) => {
   }
   const token = parts[1];
   try {
+    if (!process.env.JWT_SECRET) {
+        console.error('JWT_SECRET is missing from process.env');
+    }
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log('Token decoded successfully for role:', decoded.role);
     // Allow superAdmin, admin, operation, and codClient for general admin routes
     const allowedRoles = ['superAdmin', 'admin', 'operation', 'operationPortal', 'codClient', 'codClientPortal'];
     if (!allowedRoles.includes(decoded.role)) {
+      console.warn(`Role "${decoded.role}" not in allowedRoles for adminAuth`);
+      console.warn(`Role ${decoded.role} not in allowedRoles for adminAuth`);
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
     req.user = decoded;
     next();
   } catch (err) {
+    console.error('Token verification failed:', err.message);
+    if (err.name === 'TokenExpiredError') {
+        console.error('Token expired at:', err.expiredAt);
+    }
     return res.status(401).json({ success: false, message: 'Invalid or expired token' });
   }
 };
@@ -152,7 +163,8 @@ const adminAuth = (req, res, next) => {
 // Super Admin only middleware
 const superAdminAuth = (req, res, next) => {
   adminAuth(req, res, () => {
-    if (!req.user || req.user.role !== 'superAdmin') {
+    // Allow both superAdmin and admin role to access superAdmin routes
+    if (!req.user || (req.user.role !== 'superAdmin' && req.user.role !== 'admin')) {
       return res.status(403).json({ success: false, message: 'Super Admin access required' });
     }
     next();

@@ -4,6 +4,10 @@ const BookingStatus = require("../models/bookingStatus");
 const XLSX = require('xlsx');
 const GiftConfig = require("../models/GiftConfig");
 const InternationalConfig = require("../models/InternationalConfig");
+const RateCard = require("../models/RateCard");
+const Customer = require("../models/Customer");
+const UserAuth = require("../models/UserAuth");
+const { calculateCharges } = require("./rateCardController");
 
 // Create a booking (Admin or Customer)
 exports.createBooking = async (req, res) => {
@@ -64,20 +68,88 @@ exports.createBooking = async (req, res) => {
       });
     }
 
-    // Overnight Pricing and Priority Engine
+    // Overnight Pricing and Priority Engine (NOW DEPRECATED BY SMART ENGINE BELOW)
     let finalDeliveryCharges = Number(initialDeliveryCharges) || 0;
     let isOvernight = false;
     let priorityHandling = false;
     let estimatedDeliveryDays = 3;
 
-    if (serviceType === 'overnight') {
-      finalDeliveryCharges = finalDeliveryCharges * 1.5; // 50% Higher Rate
-      isOvernight = true;
-      priorityHandling = true;
-      estimatedDeliveryDays = 1; // Fast delivery (next day)
+    // ─── START SMART PRICING ENGINE ──────────────────────────────────────────
+    // Only calculate if initialDeliveryCharges is 0 or not provided (to allow manual override by Admin)
+    if (!initialDeliveryCharges || initialDeliveryCharges === 0 || initialDeliveryCharges === "0") {
+        try {
+            let rateFound = false;
+            
+            // 1. Check Customer-specific rates (Special Rates)
+            const customer = await UserAuth.findById(finalCustomerId);
+            if (customer && customer.specialRates && customer.specialRates.length > 0) {
+                // Find matching special rate by service type and destination partial match
+                const specialRate = customer.specialRates.find(rate => 
+                    rate.isActive &&
+                    rate.serviceType.toLowerCase() === serviceType.toLowerCase() &&
+                    destinationCity.toLowerCase().includes(rate.destinationCity.toLowerCase())
+                );
+
+                if (specialRate) {
+                    console.log("Using Special Rate for customer:", customer.username);
+                    finalDeliveryCharges = calculateCharges({
+                        weight,
+                        baseWeight: specialRate.baseWeight || 1,
+                        baseRate: specialRate.baseRate,
+                        additionalWeightUnit: specialRate.additionalWeightUnit || 0.5,
+                        additionalRate: specialRate.additionalRate
+                    });
+                    rateFound = true;
+                }
+            }
+
+            // 2. If no special rate, check Global Rate Card
+            if (!rateFound) {
+                const globalRate = await RateCard.findOne({
+                    serviceType: serviceType.toLowerCase(),
+                    destinationCity: { $regex: new RegExp(destinationCity.split('(')[0].trim(), 'i') },
+                    isActive: true
+                });
+
+                if (globalRate) {
+                    console.log("Using Global Rate Card rule");
+                    finalDeliveryCharges = calculateCharges({
+                        weight,
+                        baseWeight: globalRate.baseWeight,
+                        baseRate: globalRate.baseRate,
+                        additionalWeightUnit: globalRate.additionalWeightUnit,
+                        additionalRate: globalRate.additionalRate
+                    });
+                    rateFound = true;
+                }
+            }
+            
+            // 3. Last Fallback (Legacy Hardcoded Logic)
+            if (!rateFound) {
+                console.log("No specific rate found, using legacy fallback");
+                if (serviceType.toLowerCase() === 'overnight') {
+                    finalDeliveryCharges = weight * 250; // Example fallback for overnight
+                    isOvernight = true;
+                    priorityHandling = true;
+                    estimatedDeliveryDays = 1;
+                } else {
+                    finalDeliveryCharges = weight * 150; // Standard fallback
+                }
+            }
+        } catch (priceErr) {
+            console.error("Error in Pricing Engine:", priceErr);
+            // Don't crash, use a safe default
+            finalDeliveryCharges = Number(initialDeliveryCharges) || 200;
+        }
     }
 
-    // Gift Service Logic
+    if (serviceType.toLowerCase() === 'overnight') {
+        isOvernight = true;
+        priorityHandling = true;
+        estimatedDeliveryDays = 1;
+    }
+
+    // Gift Service Logic (Applied on top of base charges)
     const giftConfig = await GiftConfig.findOne();
     const isGiftServiceEnabled = giftConfig ? giftConfig.enabled : false;
 
@@ -92,10 +164,10 @@ exports.createBooking = async (req, res) => {
       }
     }
 
-    // International Service Logic
+    // International Service Logic (Overrides others)
     let isInternationalEnabled = false;
     let internationalConfig = null;
-    if (serviceType === 'international' || (typeof isInternational !== 'undefined' && isInternational)) {
+    if (serviceType.toLowerCase() === 'international' || (typeof isInternational !== 'undefined' && isInternational)) {
       internationalConfig = await InternationalConfig.findOne();
       isInternationalEnabled = internationalConfig ? internationalConfig.enabled : false;
 
