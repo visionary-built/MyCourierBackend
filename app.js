@@ -26,7 +26,7 @@ const verifyToken = (token) => {
 
 // CORS middleware
 app.use(cors({
-  // origin: ['http://localhost:3000', 'https://tezlift-kappa.vercel.app'],
+  // origin: ['http://localhost:3000', 'courier-orpin.vercel.app'],
   origin: 'http://localhost:3000',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -65,6 +65,10 @@ app.get('/api/test', (req, res) => {
 
 // Admin Routes
 app.use('/api/admin', adminRoutes);
+
+// Operation Portal Routes
+const operationPortalRoutes = require('./routes/operationPortalRoutes');
+app.use('/api/operation', operationPortalRoutes);
 
 // Customer Routes
 app.use('/api/customer', customerRoutes);

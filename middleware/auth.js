@@ -171,6 +171,16 @@ const superAdminAuth = (req, res, next) => {
   });
 };
 
+// Operation Portal only middleware
+const operationAuth = (req, res, next) => {
+  adminAuth(req, res, () => {
+    if (!req.user || (req.user.role !== 'operation' && req.user.role !== 'operationPortal' && req.user.role !== 'superAdmin' && req.user.role !== 'admin')) {
+      return res.status(403).json({ success: false, message: 'Operation access required' });
+    }
+    next();
+  });
+};
+
 // Middleware to verify COD Client Portal token
 const authenticateCodClient = async (req, res, next) => {
   try {
@@ -220,5 +230,6 @@ module.exports = {
   authenticateAdmin,
   adminAuth,
   superAdminAuth,
+  operationAuth,
   authenticateCodClient
 };
