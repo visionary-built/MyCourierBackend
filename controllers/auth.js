@@ -20,7 +20,7 @@ exports.adminLogin = async (req, res) => {
 
         if (user) {
             // Check if user has an admin-related role
-            const adminRoles = ['superAdmin', 'admin', 'operation', 'codClient'];
+            const adminRoles = ['superAdmin', 'admin', 'operation', 'operationPortal', 'codClient'];
             if (!adminRoles.includes(user.role)) {
                 return res.status(403).json({ success: false, message: "Not authorized as admin" });
             }
@@ -155,6 +155,67 @@ exports.codClientLogin = async (req, res) => {
 
     } catch (err) {
         console.error('COD Client login error:', err);
+        return res.status(500).json({ 
+            success: false,
+            message: "Internal server error",
+            error: process.env.NODE_ENV === 'development' ? err.message : undefined
+        });
+    }
+};
+
+exports.operationPortalLogin = async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        if (!email || !password) {
+            return res.status(400).json({ success: false, message: "Email and password are required" });
+        }
+
+        let user = await UserAuth.findOne({ email });
+
+        if (!user || (user.role !== 'operationPortal' && user.role !== 'operation')) {
+            return res.status(401).json({ success: false, message: "Invalid credentials or unauthorized access" });
+        }
+
+        const passwordMatch = await bcrypt.compare(password, user.password);
+        if (!passwordMatch) {
+            return res.status(401).json({ success: false, message: "Invalid credentials" });
+        }
+
+        const token = jwt.sign(
+            { 
+                email: user.email, 
+                role: user.role,
+                id: user._id,
+                timestamp: Date.now()
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: "7d" }
+        );
+
+        res.cookie('token', token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 7 * 24 * 60 * 60 * 1000
+        });
+
+        return res.json({
+            success: true,
+            message: "Login successful",
+            token,
+            role: user.role,
+            user: {
+                id: user._id,
+                email: user.email,
+                fullName: user.fullName,
+                username: user.username,
+                role: user.role
+            }
+        });
+
+    } catch (err) {
+        console.error('Operation Portal login error:', err);
         return res.status(500).json({ 
             success: false,
             message: "Internal server error",

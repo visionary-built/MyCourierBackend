@@ -36,9 +36,24 @@ exports.createCustomer = async (req, res) => {
     const finalBrandName = brandName || brandNameBackend;
     const finalIsActive = isActive === 'YES' || isActive === true || isActiveBackend || false;
 
-    const city = req.body.city || 'Default City';
-    const serialNo = req.body.serialNo || `SN${Date.now()}`;
-    const accountNo = req.body.accountNo || `ACC${Date.now()}`;
+    // Generate Serial Number automatically
+    const lastCustomer = await Customer.findOne().sort({ createdAt: -1 });
+    
+    let nextSerialNo = 'SN001';
+
+    if (lastCustomer && lastCustomer.serialNo) {
+      const serialMatch = lastCustomer.serialNo.match(/(\d+)$/);
+      if (serialMatch) {
+        const lastSerialNum = parseInt(serialMatch[1]);
+        nextSerialNo = `SN${(lastSerialNum + 1).toString().padStart(3, '0')}`;
+      }
+    }
+
+    const { city: reqCity, serialNo: reqSerialNo, accountNo: reqAccountNo } = req.body;
+
+    const city = reqCity || 'Default City';
+    const serialNo = reqSerialNo || nextSerialNo;
+    const accountNo = reqAccountNo;
 
     if (!finalUsername || !email || !password || !confirmPassword) {
       return res.status(400).json({

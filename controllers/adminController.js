@@ -23,7 +23,11 @@ exports.createCodPortal = async (req, res) => {
 exports.createUser = async (req, res) => {
     try {
         console.log("Create User Payload:", req.body);
-        const { fullName, username, email, password, role, phoneNumber } = req.body;
+        const { 
+            fullName, username, email, password, role, phoneNumber,
+            companyName, address, contactPerson, creditLimit, paymentTerms, clientId,
+            specialRates
+        } = req.body;
         const creatorRole = req.user.role;
 
         if (!email || !password || !role || !username) {
@@ -42,11 +46,11 @@ exports.createUser = async (req, res) => {
             });
         }
 
-        // Permission check: Admin can only create operation and codClient portals
-        if (creatorRole === 'admin' && !['operationPortal', 'codClientPortal'].includes(role)) {
+        // Permission check: Admin and superAdmin can create any admin-related roles
+        if (!['superAdmin', 'admin'].includes(creatorRole)) {
             return res.status(403).json({ 
                 success: false, 
-                message: "Admins can only create Operation Portal and COD Client Portal users" 
+                message: "Access denied" 
             });
         }
 
@@ -69,6 +73,13 @@ exports.createUser = async (req, res) => {
             password: hashedPassword,
             phoneNumber,
             role,
+            companyName,
+            address,
+            contactPerson,
+            creditLimit,
+            paymentTerms,
+            clientId,
+            specialRates,
             isAdmin: ['superAdmin', 'admin'].includes(role)
         });
 
@@ -106,16 +117,16 @@ exports.getAllUsers = async (req, res) => {
         
         let query = {};
         
-        if (creatorRole === 'superAdmin') {
+        if (['superAdmin', 'admin'].includes(creatorRole)) {
             query.role = { $in: ['admin', 'operation', 'operationPortal', 'codClient', 'codClientPortal', 'superAdmin'] };
         } else {
-            // Admins can only see operation and codClient users
-            query.role = { $in: ['operation', 'operationPortal', 'codClient', 'codClientPortal'] };
+            // Other roles can't see users
+            return res.status(403).json({ success: false, message: "Access denied" });
         }
         
         if (role) {
-            // Sanity check for admin role
-            if (creatorRole === 'admin' && !['operationPortal', 'codClientPortal'].includes(role)) {
+            // Sanity check for roles: allow admin and superAdmin to filter any role.
+            if (!['superAdmin', 'admin'].includes(creatorRole)) {
                 return res.status(403).json({ success: false, message: "Access denied" });
             }
             query.role = role;
@@ -177,7 +188,14 @@ exports.updateUser = async (req, res) => {
             email,
             password,
             role,
-            phoneNumber
+            phoneNumber,
+            companyName,
+            address,
+            contactPerson,
+            creditLimit,
+            paymentTerms,
+            clientId,
+            specialRates
         } = req.body;
 
         const updaterRole = req.user.role;
@@ -198,14 +216,16 @@ exports.updateUser = async (req, res) => {
             });
         }
 
-        // Prevent non-superAdmin from modifying superAdmin/admin accounts
+        // Both superAdmin and admin can modify any account.
+        // We only protect the primary bootstrap admin account.
         if (
-            updaterRole === 'admin' &&
-            ['superAdmin', 'admin'].includes(userToUpdate.role)
+            userToUpdate.email === process.env.EMAIL && 
+            userToUpdate.role === 'superAdmin' &&
+            updaterRole !== 'superAdmin'
         ) {
             return res.status(403).json({
                 success: false,
-                message: "Admins cannot modify Super Admin or Admin accounts"
+                message: "Only the primary Super Admin can modify the bootstrap account"
             });
         }
 
@@ -218,15 +238,14 @@ exports.updateUser = async (req, res) => {
             });
         }
 
-        // Admins can only assign certain roles
+        // Both admin and superAdmin can assign any role
         if (
-            updaterRole === 'admin' &&
-            role &&
-            !['operationPortal', 'codClientPortal'].includes(role)
+            !['superAdmin', 'admin'].includes(updaterRole) &&
+            role
         ) {
             return res.status(403).json({
                 success: false,
-                message: "Admins can only assign Operation Portal and COD Client Portal roles"
+                message: "Access denied"
             });
         }
 
@@ -261,19 +280,28 @@ exports.updateUser = async (req, res) => {
         }
 
         if (role) {
-            // Only superAdmin can promote/demote to/from admin/superAdmin
+            // Only allow superAdmin or admin to assign these roles
             if (
-                updaterRole !== 'superAdmin' &&
+                !['superAdmin', 'admin'].includes(updaterRole) &&
                 ['admin', 'superAdmin'].includes(role)
             ) {
                 return res.status(403).json({
                     success: false,
-                    message: "Only Super Admin can assign Admin or Super Admin roles"
+                    message: "Only an Admin or Super Admin can assign these roles"
                 });
             }
             userToUpdate.role = role;
             userToUpdate.isAdmin = ['superAdmin', 'admin'].includes(role);
         }
+
+        // Business & Pricing Fields
+        if (typeof companyName !== 'undefined') userToUpdate.companyName = companyName;
+        if (typeof address !== 'undefined') userToUpdate.address = address;
+        if (typeof contactPerson !== 'undefined') userToUpdate.contactPerson = contactPerson;
+        if (typeof creditLimit !== 'undefined') userToUpdate.creditLimit = creditLimit;
+        if (typeof paymentTerms !== 'undefined') userToUpdate.paymentTerms = paymentTerms;
+        if (typeof clientId !== 'undefined') userToUpdate.clientId = clientId;
+        if (typeof specialRates !== 'undefined') userToUpdate.specialRates = specialRates;
 
         await userToUpdate.save();
 

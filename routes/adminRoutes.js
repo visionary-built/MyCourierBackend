@@ -26,6 +26,7 @@ const overnightServiceController = require('../controllers/overnightServiceContr
 const giftServiceController = require('../controllers/giftServiceController');
 const internationalServiceController = require('../controllers/internationalServiceController');
 const monitoringController = require('../controllers/monitoringController');
+const rateCardController = require('../controllers/rateCardController');
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -204,10 +205,10 @@ router.get('/revenue/summary', revenueController.getRevenueSummary);
 router.get('/revenue/clients', superAdminAuth, revenueController.getClientRevenue);
 router.get('/revenue/timeseries', superAdminAuth, revenueController.getRevenueTimeSeries);
 
-// Sales Management Routes (SuperAdmin only for full visibility)
-router.get('/sales/summary', superAdminAuth, salesController.getSalesSummary);
-router.get('/sales/report', superAdminAuth, salesController.getSalesReport);
-router.get('/sales/export', superAdminAuth, salesController.exportSalesReport);
+// Sales Management Routes
+router.get('/sales/summary', adminAuth, salesController.getSalesSummary);
+router.get('/sales/report', adminAuth, salesController.getSalesReport);
+router.get('/sales/export', adminAuth, salesController.exportSalesReport);
 
 // Invoice Routes
 router.get('/invoice/customers', invoiceController.getAvailableAgents);
@@ -217,23 +218,29 @@ router.get('/invoice/generate-rider', invoiceController.generateRiderInvoice);
 router.get('/invoice', invoiceController.getAllInvoices);
 
 // Monitoring Routes (Operations & Sales)
-router.post('/monitoring/targets', superAdminAuth, monitoringController.setSalesTarget);
-router.get('/monitoring/targets', superAdminAuth, monitoringController.getSalesTargets);
-router.get('/monitoring/target-vs-achieved', superAdminAuth, monitoringController.getTargetVsAchieved);
-router.get('/monitoring/rider-performance', superAdminAuth, monitoringController.getRiderPerformance);
+router.post('/monitoring/targets', adminAuth, monitoringController.setSalesTarget);
+router.get('/monitoring/targets', adminAuth, monitoringController.getSalesTargets);
+router.get('/monitoring/target-vs-achieved', adminAuth, monitoringController.getTargetVsAchieved);
+router.get('/monitoring/rider-performance', adminAuth, monitoringController.getRiderPerformance);
 
 // Overnight Service Routes
 router.get('/services/overnight/config', superAdminAuth, overnightServiceController.getOvernightConfig);
 router.post('/services/overnight/calculate', superAdminAuth, overnightServiceController.calculateOvernightRate);
 
 // Gift Service Routes
-router.get('/services/gift/config', superAdminAuth, giftServiceController.getGiftConfig);
+router.get('/services/gift/config', adminAuth, giftServiceController.getGiftConfig);
 router.put('/services/gift/config', superAdminAuth, giftServiceController.updateGiftConfig);
-router.get('/services/gift/bookings', superAdminAuth, giftServiceController.getGiftBookings);
+router.get('/services/gift/bookings', adminAuth, giftServiceController.getGiftBookings);
 
 // International Service Routes
-router.get('/services/international/config', superAdminAuth, internationalServiceController.getInternationalConfig);
+router.get('/services/international/config', adminAuth, internationalServiceController.getInternationalConfig);
 router.put('/services/international/config', superAdminAuth, internationalServiceController.updateInternationalConfig);
-router.get('/services/international/bookings', superAdminAuth, internationalServiceController.getInternationalBookings);
+router.get('/services/international/bookings', adminAuth, internationalServiceController.getInternationalBookings);
+
+// ─── Global Rate Card / Rates Adjustment ────────────────────────────────────
+router.get('/rate-cards', rateCardController.getAllRateCards);
+router.post('/rate-cards', superAdminAuth, rateCardController.createRateCard);
+router.put('/rate-cards/:id', superAdminAuth, rateCardController.updateRateCard);
+router.delete('/rate-cards/:id', superAdminAuth, rateCardController.deleteRateCard);
 
 module.exports = router;
