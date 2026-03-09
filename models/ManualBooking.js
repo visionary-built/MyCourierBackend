@@ -69,8 +69,9 @@ const ManualBookingSchema = new mongoose.Schema({
 
 ManualBookingSchema.pre("save", function (next) {
   if (!this.consignmentNo) {
-    const uniquePart = Date.now().toString().slice(-6);
-    this.consignmentNo = "CN" + Math.floor(100000 + Math.random() * 900000) + uniquePart;
+    const timestamp = Date.now().toString().slice(-8);
+    const random = Math.floor(1000 + Math.random() * 9000);
+    this.consignmentNo = "CN" + timestamp + random;
   }
   next();
 });
