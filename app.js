@@ -6,6 +6,7 @@ const app = express();
 const adminRoutes = require('./routes/adminRoutes');
 const customerRoutes = require('./routes/customerRoutes');
 const riderRoutes = require('./routes/riderRoutes');
+const authController = require('./controllers/auth');
 // JWT Secret from environment variables
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -80,25 +81,8 @@ app.use('/api/rider', riderRoutes);
 const codClientPortalRoutes = require('./routes/CodClientPortal');
 app.use('/api/cod-client', codClientPortalRoutes);
 
-// JWT test routes
-app.post('/api/login', (req, res) => {
-  const { username, password } = req.body;
-  
-  // Simple authentication (replace with your actual auth logic)
-  if (username === 'admin' && password === 'password') {
-    const token = generateToken({ userId: 1, username: 'admin' });
-    res.json({ 
-      success: true, 
-      message: 'Login successful',
-      token 
-    });
-  } else {
-    res.status(401).json({ 
-      success: false, 
-      message: 'Invalid credentials' 
-    });
-  }
-});
+// Unified login route for Admin / Customer / Rider / Operation / COD Client
+app.post('/api/login', authController.unifiedLogin);
 
 // Public Routes
 const publicRoutes = require('./routes/publicRoutes');

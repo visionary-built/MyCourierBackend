@@ -1,4 +1,5 @@
 const Customer = require('../models/Customer');
+const UserAuth = require('../models/UserAuth');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
@@ -77,6 +78,15 @@ exports.createCustomer = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Customer with this email, username, or account number already exists'
+      });
+    }
+
+    // Also ensure no admin/portal user already uses this email
+    const existingUserAuthWithEmail = await UserAuth.findOne({ email });
+    if (existingUserAuthWithEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'This email is already used for an admin/portal account'
       });
     }
 
