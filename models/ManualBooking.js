@@ -19,6 +19,10 @@ const ManualBookingSchema = new mongoose.Schema({
   deliveryCharges: { type: Number, default: 0 },
   productDetail: { type: String },
   remarks: { type: String },
+  // Sender details (auto-filled from customer profile when available)
+  senderName: { type: String },
+  senderAddress: { type: String },
+  senderPhone: { type: String },
   
   // Overnight Service Additions
   isOvernight: { type: Boolean, default: false },

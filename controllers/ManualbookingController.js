@@ -58,8 +58,22 @@ exports.createBooking = async (req, res) => {
     const userInfo = {
       accountNo: (req.user && req.user.accountNo) || "TEST-ACCOUNT",
       username: (req.user && req.user.username) || "test-admin",
-      name: (req.user && req.user.name) || "Test Admin"
+      name: (req.user && (req.user.name || req.user.username)) || "Test Admin"
     };
+
+    // Sender details from customer profile when available.
+    // We do NOT invent dummy values here; if profile fields are missing,
+    // they remain undefined and the label/load-sheet API will apply its own defaults.
+    let senderName;
+    let senderAddress;
+    let senderPhone;
+
+    // For authenticated customer (customer portal), auth middleware sets req.customer
+    if (req.customer) {
+      senderName = req.customer.brandName || req.customer.contactPerson || req.customer.username;
+      senderAddress = req.customer.address;
+      senderPhone = req.customer.contactNo;
+    }
 
     if (!serviceType || !originCity || !destinationCity || !consigneeName || !consigneeMobile || !weight) {
       return res.status(400).json({
@@ -205,6 +219,9 @@ exports.createBooking = async (req, res) => {
       deliveryCharges: finalDeliveryCharges,
       productDetail,
       remarks,
+      senderName,
+      senderAddress,
+      senderPhone,
       isOvernight,
       priorityHandling,
       estimatedDeliveryDays,
@@ -220,8 +237,12 @@ exports.createBooking = async (req, res) => {
       const bookingStatus = new BookingStatus({
         consignmentNumber: newBooking.consignmentNo,
         destinationCity: newBooking.destinationCity,
+        originCity: newBooking.originCity,
         accountNo: userInfo.accountNo,
         agentName: userInfo.name || userInfo.username,
+        senderName,
+        senderAddress,
+        senderPhone,
         status: "pending",
         bookingDate: newBooking.date || new Date(),
         remarks: `Created via ${createdBy === "admin" ? "Admin" : "Customer"} portal`
@@ -253,13 +274,14 @@ exports.createBooking = async (req, res) => {
 exports.getAllBookings = async (req, res) => {
   try {
     let query = {};
-    
-    // If user is a customer or codClient, only show their bookings
-    if (req.user && (req.user.role === "customer" || req.user.role === "codClientPortal")) {
-      query.customerId = req.user._id;
+
+    // If request is coming from authenticated customer portal, scope to that customer
+    if (req.customer) {
+      query.customerId = String(req.customer._id);
+    } else if (req.user && (req.user.role === "customer" || req.user.role === "codClientPortal")) {
+      // Fallback for other portals that might set role on req.user
+      query.customerId = String(req.user._id);
     }
-    
-    // For admin users, show all bookings (no additional filtering needed)
     
     const bookings = await ManualBooking.find(query)
       .sort({ createdAt: -1 });
@@ -480,12 +502,13 @@ exports.getBookingsWithFilters = async (req, res) => {
 
     let query = {};
 
-    // If user is a customer or cod client, only show their bookings
-    if (req.user && (req.user.role === "customer" || req.user.role === "codClientPortal")) {
-      query.customerId = req.user._id;
+    // If request is coming from authenticated customer portal, scope to that customer
+    if (req.customer) {
+      query.customerId = String(req.customer._id);
+    } else if (req.user && (req.user.role === "customer" || req.user.role === "codClientPortal")) {
+      // Fallback for other portals that might set role on req.user
+      query.customerId = String(req.user._id);
     }
-    
-    // For admin users, show all bookings (no additional filtering needed)
 
     if (status) query.status = status;
     if (serviceType) query.serviceType = serviceType;
@@ -548,7 +571,7 @@ exports.bulkImportBookings = async (req, res) => {
     }
 
     // Determine who is creating the bookings
-    const createdBy = req.user && req.user.role === "customer" ? "customer" : "admin";
+    const createdBy = req.customer ? "customer" : (req.user && req.user.role === "customer" ? "customer" : "admin");
     let finalCustomerId;
     
     // If customer or cod client is creating their own bookings, use their ID
@@ -567,8 +590,19 @@ exports.bulkImportBookings = async (req, res) => {
     const userInfo = {
       accountNo: (req.user && req.user.accountNo) || "TEST-ACCOUNT",
       username: (req.user && req.user.username) || "test-admin",
-      name: (req.user && req.user.name) || "Test Admin"
+      name: (req.user && (req.user.name || req.user.username)) || "Test Admin"
     };
+
+    // Sender details from customer profile when available.
+    let senderName;
+    let senderAddress;
+    let senderPhone;
+
+    if (req.customer) {
+      senderName = req.customer.brandName || req.customer.contactPerson || req.customer.username;
+      senderAddress = req.customer.address;
+      senderPhone = req.customer.contactNo;
+    }
 
     // Read Excel file
     const workbook = XLSX.readFile(req.file.path);
@@ -713,15 +747,19 @@ exports.bulkImportBookings = async (req, res) => {
 
         // Create booking status
         try {
-          const bookingStatus = new BookingStatus({
-            consignmentNumber: newBooking.consignmentNo,
-            destinationCity: newBooking.destinationCity,
-            accountNo: userInfo.accountNo,
-            agentName: userInfo.name || userInfo.username,
-            status: "pending",
-            bookingDate: newBooking.date || new Date(),
-            remarks: `Bulk imported via ${createdBy === "admin" ? "Admin" : "Customer"} portal`
-          });
+        const bookingStatus = new BookingStatus({
+          consignmentNumber: newBooking.consignmentNo,
+          destinationCity: newBooking.destinationCity,
+          originCity: newBooking.originCity,
+          accountNo: userInfo.accountNo,
+          agentName: userInfo.name || userInfo.username,
+          senderName,
+          senderAddress,
+          senderPhone,
+          status: "pending",
+          bookingDate: newBooking.date || new Date(),
+          remarks: `Bulk imported via ${createdBy === "admin" ? "Admin" : "Customer"} portal`
+        });
 
           await bookingStatus.save();
         } catch (statusError) {
@@ -768,3 +806,71 @@ exports.bulkImportBookings = async (req, res) => {
     });
   }
 };
+
+// Manual Booking Stats (Admin or scoped customer)
+// Returns: total shipments, total COD amount, delivered & pending shipments
+exports.getManualBookingStats = async (req, res) => {
+  try {
+    const { dateFrom, dateTo } = req.query;
+
+    const query = {};
+
+    // Scope to current customer if coming from customer or COD client portal
+    if (req.customer) {
+      query.customerId = String(req.customer._id);
+    } else if (req.user && (req.user.role === "codClientPortal")) {
+      query.customerId = String(req.user._id);
+    }
+
+    // Optional date filter on booking date
+    if (dateFrom || dateTo) {
+      query.date = {};
+      if (dateFrom) {
+        query.date.$gte = new Date(dateFrom);
+      }
+      if (dateTo) {
+        const end = new Date(dateTo);
+        end.setDate(end.getDate() + 1);
+        query.date.$lt = end;
+      }
+    }
+
+    const bookings = await ManualBooking.find(query)
+      .select("status codAmount")
+      .lean();
+
+    const totalShipments = bookings.length;
+    let totalCodAmount = 0;
+    let deliveredShipments = 0;
+    let pendingShipments = 0;
+
+    bookings.forEach((b) => {
+      totalCodAmount += b.codAmount || 0;
+      if (b.status === "delivered") deliveredShipments += 1;
+      if (b.status === "pending") pendingShipments += 1;
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Manual booking stats retrieved successfully",
+      data: {
+        totalShipments,
+        totalCodAmount,
+        deliveredShipments,
+        pendingShipments,
+        dateRange: {
+          from: dateFrom || null,
+          to: dateTo || null
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Error getting manual booking stats:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while getting manual booking stats",
+      error: error.message
+    });
+  }
+};
+

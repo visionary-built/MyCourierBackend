@@ -78,6 +78,8 @@ router.put('/bookings/:consignmentNumber/status', authenticateCustomer, validate
 // MANUAL BOOKING ROUTES - Customer CRUD Operations (Create Parcel)
 router.post('/manual-booking', authenticateCustomer, manualBookingController.createBooking);
 router.get('/manual-booking', authenticateCustomer, manualBookingController.getAllBookings);
+// Stats route MUST be defined before any dynamic :id route
+router.get('/manual-booking/stats', authenticateCustomer, manualBookingController.getManualBookingStats);
 router.get('/manual-booking/search', authenticateCustomer, manualBookingController.getBookingsWithFilters);
 router.get('/manual-booking/:id', authenticateCustomer, manualBookingController.getBookingById);
 router.get('/manual-booking/consignment/:consignmentNo', authenticateCustomer, validateConsignmentNumber, manualBookingController.getBookingByConsignmentNo);
@@ -87,11 +89,15 @@ router.delete('/manual-booking/:id', authenticateCustomer, manualBookingControll
 // MANUAL BOOKING - Bulk Import
 router.post('/manual-booking/bulk-import', authenticateCustomer, upload.single('excelFile'), handleUploadError, manualBookingController.bulkImportBookings);
 
-// ADDRESS LABEL ROUTES
+// ADDRESS LABEL / LOAD SHEET ROUTES
 router.get('/labels/search', authenticateCustomer, addressLabelController.getAllBookings);
 router.get('/labels/:consignmentNumber', authenticateCustomer, validateConsignmentNumber, addressLabelController.getBookingByNumber);
 router.get('/labels/:consignmentNumber/generate', authenticateCustomer, validateConsignmentNumber, addressLabelController.generateAddressLabel);
 router.get('/labels/:consignmentNumber/data', authenticateCustomer, validateConsignmentNumber, addressLabelController.getLabelData);
+
+// Load Sheet aliases for customer (view/print own consignments)
+router.get('/load-sheet/:consignmentNumber', authenticateCustomer, validateConsignmentNumber, addressLabelController.getLabelData);
+router.get('/load-sheet/:consignmentNumber/pdf', authenticateCustomer, validateConsignmentNumber, addressLabelController.generateAddressLabel);
 
 // INVOICE ROUTES
 router.get('/invoices/generate', authenticateCustomer, invoiceController.generateInvoice);

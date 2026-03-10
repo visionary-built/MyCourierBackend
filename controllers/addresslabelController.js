@@ -394,9 +394,9 @@ exports.generateAddressLabel = async (req, res) => {
         doc.moveTo(10, 220).lineTo(290, 220).stroke();
         doc.font('Helvetica-Bold').fontSize(12).text('FROM:', 15, 230);
         doc.font('Helvetica').fontSize(10)
-            .text(booking.senderName || 'Sender Name', 15, 250)
-            .text(booking.senderAddress || '123 Sender St, City, Country', 15, 265)
-            .text(`Contact: ${booking.senderPhone || 'N/A'}`, 15, 280);
+            .text(booking.senderName || '', 15, 250)
+            .text(booking.senderAddress || '', 15, 265)
+            .text(booking.senderPhone ? `Contact: ${booking.senderPhone}` : '', 15, 280);
         doc.moveTo(10, 300).lineTo(290, 300).stroke();
         doc.font('Helvetica-Bold').fontSize(12).text('TO:', 15, 310);
         doc.font('Helvetica').fontSize(10)
@@ -449,10 +449,16 @@ exports.getLabelData = async (req, res) => {
 
         const labelData = {
             consignmentNumber: booking.consignmentNumber || booking.consignmentNo,
+            // Origin / destination and account information
+            originCity: booking.originCity || 'N/A',
+            destinationCity: booking.destinationCity || 'N/A',
+            accountNo: booking.accountNo || booking.customerId || 'N/A',
+            serviceType: booking.serviceType || 'N/A',
+            // Sender / recipient details (no dummy values – rely on stored data)
             sender: {
-                name: booking.senderName || 'Sender Name',
-                address: booking.senderAddress || '123 Sender St, City, Country',
-                phone: booking.senderPhone || 'N/A'
+                name: booking.senderName || null,
+                address: booking.senderAddress || null,
+                phone: booking.senderPhone || null
             },
             recipient: {
                 name: booking.consigneeName || 'Recipient Name',
@@ -460,17 +466,18 @@ exports.getLabelData = async (req, res) => {
                 phone: booking.consigneeMobile || 'N/A',
                 mobileNo: booking.consigneeMobile || 'N/A'
             },
+            // Package and financial info
             packageInfo: {
                 pieces: booking.pieces || 1,
                 weight: booking.weight || 'N/A',
                 codAmount: booking.codAmount || 0,
-                referenceNo: booking.referenceNo || 'N/A',
+                referenceNo: booking.referenceNo || booking.customerReferenceNo || 'N/A',
                 assignedTo: booking.assignedTo || booking.riderId || 'Not Assigned'
             },
             pieces: booking.pieces || 1,
             weight: booking.weight || 'N/A',
             codAmount: booking.codAmount || 0,
-            referenceNo: booking.referenceNo || 'N/A',
+            referenceNo: booking.referenceNo || booking.customerReferenceNo || 'N/A',
             assignedTo: booking.assignedTo || booking.riderId || 'Not Assigned',
             timestamp: new Date().toISOString()
         };

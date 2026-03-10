@@ -143,6 +143,7 @@ router.put('/return-sheet/:id/complete', returnSheetController.completeReturnShe
 // Manual Booking - Full CRUD Operations
 router.post("/manual-booking", manualBookingController.createBooking);
 router.get("/manual-booking", manualBookingController.getAllBookings);
+router.get("/manual-booking/stats", adminAuth, manualBookingController.getManualBookingStats);
 router.get("/manual-booking/search", manualBookingController.getBookingsWithFilters);
 router.get("/manual-booking/:id", manualBookingController.getBookingById);
 router.get("/manual-booking/consignment/:consignmentNo", manualBookingController.getBookingByConsignmentNo);
@@ -186,12 +187,16 @@ router.get('/track/id/:id', getTrackingById);
 router.get('/track/number/:consignmentNumber', getTrackingByConsignmentNumber);
 router.get('/track', getAllConsignments);
 
-// Address Label Routes
+// Address Label / Load Sheet Routes
 router.get('/address-lable', addresslabelController.getAllBookings);
 router.get('/address-lable/search', addresslabelController.searchBookings);
 router.get('/address-lable/:consignmentNumber', addresslabelController.getBookingByNumber);
 router.get('/address-lable/:consignmentNumber/pdf', addresslabelController.generateAddressLabel);
 router.get('/address-lable/:consignmentNumber/data', addresslabelController.getLabelData);
+
+// Explicit Load Sheet aliases for admin
+router.get('/load-sheet/:consignmentNumber', addresslabelController.getLabelData);
+router.get('/load-sheet/:consignmentNumber/pdf', addresslabelController.generateAddressLabel);
 
 
 // QSR Report Routes
