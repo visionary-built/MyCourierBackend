@@ -54,6 +54,8 @@ const ManualBookingSchema = new mongoose.Schema({
   },
   
   consignmentNo: { type: String, unique: true },
+  // Human‑friendly numeric order identifier for UI (auto-generated)
+  orderId: { type: String, unique: true },
   status: {
     type: String,
     required: true,
@@ -72,11 +74,20 @@ const ManualBookingSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 ManualBookingSchema.pre("save", function (next) {
+  // Generate consignment number if missing
   if (!this.consignmentNo) {
     const timestamp = Date.now().toString().slice(-8);
     const random = Math.floor(1000 + Math.random() * 9000);
     this.consignmentNo = "CN" + timestamp + random;
   }
+
+  // Generate numeric order ID if missing
+  if (!this.orderId) {
+    const ts = Date.now().toString().slice(-6);
+    const rand = Math.floor(1000 + Math.random() * 9000);
+    this.orderId = ts + rand.toString();
+  }
+
   next();
 });
 
