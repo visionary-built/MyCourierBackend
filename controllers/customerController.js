@@ -212,7 +212,9 @@ exports.customerLogin = async (req, res) => {
 // Get all customers
 exports.getAllCustomers = async (req, res) => {
   try {
-    const customers = await Customer.find().select('-password -confirmPassword');
+    const customers = await Customer.find()
+      .sort({ createdAt: -1 })
+      .select('-password -confirmPassword');
     res.status(200).json({ success: true, data: customers });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });

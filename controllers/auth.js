@@ -1,7 +1,8 @@
 const dotenv = require('dotenv');
 dotenv.config();
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcrypt');      // used for UserAuth / Rider, etc.
+const bcryptjs = require('bcryptjs');  // used for Customer passwords
 
 const UserAuth = require('../models/UserAuth');
 const Customer = require('../models/Customer');
@@ -233,17 +234,37 @@ exports.operationPortalLogin = async (req, res) => {
 // - Riders are stored in Rider (identifier used as riderCode here)
 exports.unifiedLogin = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        // Allow frontend to send any of:
+        // - email
+        // - username
+        // - identifier (for "Email / Username / Rider Code" field)
+        const { email, username, identifier, password } = req.body;
 
-        if (!email || !password) {
-            return res.status(400).json({ success: false, message: "Email and password are required" });
+        const loginId = email || username || identifier;
+
+        console.log('Unified login request:', {
+            rawBody: req.body,
+            resolvedLoginId: loginId
+        });
+
+        if (!loginId || !password) {
+            console.log('Unified login missing credentials');
+            return res.status(400).json({ success: false, message: "Email / Username / Rider Code and password are required" });
         }
 
         // 1) Try admin / operation / codClient users (UserAuth)
-        let userAuth = await UserAuth.findOne({ email });
+        let userAuth = await UserAuth.findOne({ email: loginId });
+        if (userAuth) {
+            console.log('Unified login matched UserAuth user:', {
+                id: userAuth._id,
+                email: userAuth.email,
+                role: userAuth.role
+            });
+        }
         if (userAuth) {
             const passwordMatch = await bcrypt.compare(password, userAuth.password);
             if (!passwordMatch) {
+                console.log('Unified login UserAuth password mismatch for', loginId);
                 return res.status(401).json({ success: false, message: "Invalid credentials" });
             }
 
@@ -277,19 +298,30 @@ exports.unifiedLogin = async (req, res) => {
 
         // 2) Try customer portal (Customer model) - email or username
         const customer = await Customer.findOne({
-            $or: [{ email }, { username: email }]
+            $or: [{ email: loginId }, { username: loginId }]
         });
 
         if (customer) {
+            console.log('Unified login matched Customer:', {
+                id: customer._id,
+                email: customer.email,
+                username: customer.username,
+                isActive: customer.isActive
+            });
+        }
+
+        if (customer) {
             if (!customer.isActive) {
+                console.log('Unified login customer inactive:', customer._id);
                 return res.status(401).json({
                     success: false,
                     message: 'Account is not active. Please contact administrator.'
                 });
             }
 
-            const isPasswordValid = await bcrypt.compare(password, customer.password);
+            const isPasswordValid = await bcryptjs.compare(password, customer.password);
             if (!isPasswordValid) {
+                console.log('Unified login customer password mismatch for', loginId);
                 return res.status(401).json({
                     success: false,
                     message: 'Invalid credentials'
@@ -323,7 +355,7 @@ exports.unifiedLogin = async (req, res) => {
         }
 
         // 3) Try rider portal (Rider model) - identifier treated as riderCode
-        const rider = await Rider.findOne({ riderCode: email }).select('+password');
+        const rider = await Rider.findOne({ riderCode: loginId }).select('+password');
 
         if (rider) {
             if (!rider.active) {
