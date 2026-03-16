@@ -90,12 +90,15 @@ router.delete('/manual-booking/:id', authenticateCustomer, manualBookingControll
 router.post('/manual-booking/bulk-import', authenticateCustomer, upload.single('excelFile'), handleUploadError, manualBookingController.bulkImportBookings);
 
 // ADDRESS LABEL / LOAD SHEET ROUTES
-router.get('/labels/search', authenticateCustomer, addressLabelController.getAllBookings);
+// Default labels / load sheet list
+router.get('/labels', authenticateCustomer, addressLabelController.getAllBookings);
+router.get('/labels/search', authenticateCustomer, addressLabelController.searchBookings);
 router.get('/labels/:consignmentNumber', authenticateCustomer, validateConsignmentNumber, addressLabelController.getBookingByNumber);
 router.get('/labels/:consignmentNumber/generate', authenticateCustomer, validateConsignmentNumber, addressLabelController.generateAddressLabel);
 router.get('/labels/:consignmentNumber/data', authenticateCustomer, validateConsignmentNumber, addressLabelController.getLabelData);
 
-// Load Sheet aliases for customer (view/print own consignments)
+// Load Sheet aliases for customer (view/print consignments)
+router.get('/load-sheet', authenticateCustomer, addressLabelController.getAllBookings);
 router.get('/load-sheet/:consignmentNumber', authenticateCustomer, validateConsignmentNumber, addressLabelController.getLabelData);
 router.get('/load-sheet/:consignmentNumber/pdf', authenticateCustomer, validateConsignmentNumber, addressLabelController.generateAddressLabel);
 

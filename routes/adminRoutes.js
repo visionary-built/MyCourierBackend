@@ -195,6 +195,7 @@ router.get('/address-lable/:consignmentNumber/pdf', addresslabelController.gener
 router.get('/address-lable/:consignmentNumber/data', addresslabelController.getLabelData);
 
 // Explicit Load Sheet aliases for admin
+router.get('/load-sheet', addresslabelController.getAllBookings);
 router.get('/load-sheet/:consignmentNumber', addresslabelController.getLabelData);
 router.get('/load-sheet/:consignmentNumber/pdf', addresslabelController.generateAddressLabel);
 

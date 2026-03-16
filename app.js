@@ -27,7 +27,7 @@ const verifyToken = (token) => {
 
 // CORS middleware
 app.use(cors({
-  origin: ['http://localhost:3000', 'https://my-courier-delta.vercel.app'],
+  origin: ['http://localhost:3000', 'https://my-courier-olive.vercel.app'],
   // origin: 'http://localhost:3000',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
