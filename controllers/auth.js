@@ -1,9 +1,12 @@
 const dotenv = require('dotenv');
 dotenv.config();
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcrypt');      // used for UserAuth / Rider, etc.
+const bcryptjs = require('bcryptjs');  // used for Customer passwords
 
 const UserAuth = require('../models/UserAuth');
+const Customer = require('../models/Customer');
+const Rider = require('../models/Rider');
 
 exports.adminLogin = async (req, res) => {
     try {
@@ -219,6 +222,189 @@ exports.operationPortalLogin = async (req, res) => {
         return res.status(500).json({ 
             success: false,
             message: "Internal server error",
+            error: process.env.NODE_ENV === 'development' ? err.message : undefined
+        });
+    }
+};
+
+// Unified login for Admin / Customer / Rider / Operation / COD Client
+// Accepts: { email, password }
+// - Admin / Operation / COD Client users are stored in UserAuth (email-based)
+// - Customers are stored in Customer (email/username-based)
+// - Riders are stored in Rider (identifier used as riderCode here)
+exports.unifiedLogin = async (req, res) => {
+    try {
+        // Allow frontend to send any of:
+        // - email
+        // - username
+        // - identifier (for "Email / Username / Rider Code" field)
+        const { email, username, identifier, password } = req.body;
+
+        const loginId = email || username || identifier;
+
+        console.log('Unified login request:', {
+            rawBody: req.body,
+            resolvedLoginId: loginId
+        });
+
+        if (!loginId || !password) {
+            console.log('Unified login missing credentials');
+            return res.status(400).json({ success: false, message: "Email / Username / Rider Code and password are required" });
+        }
+
+        // 1) Try admin / operation / codClient users (UserAuth)
+        let userAuth = await UserAuth.findOne({ email: loginId });
+        if (userAuth) {
+            console.log('Unified login matched UserAuth user:', {
+                id: userAuth._id,
+                email: userAuth.email,
+                role: userAuth.role
+            });
+        }
+        if (userAuth) {
+            const passwordMatch = await bcrypt.compare(password, userAuth.password);
+            if (!passwordMatch) {
+                console.log('Unified login UserAuth password mismatch for', loginId);
+                return res.status(401).json({ success: false, message: "Invalid credentials" });
+            }
+
+            const role = userAuth.role;
+            const adminToken = jwt.sign(
+                { 
+                    email: userAuth.email, 
+                    role,
+                    id: userAuth._id,
+                    timestamp: Date.now()
+                },
+                process.env.JWT_SECRET,
+                { expiresIn: "7d" }
+            );
+
+            return res.json({
+                success: true,
+                message: "Login successful",
+                token: adminToken,
+                role,
+                userType: 'admin',
+                user: {
+                    id: userAuth._id,
+                    email: userAuth.email,
+                    fullName: userAuth.fullName,
+                    username: userAuth.username,
+                    role
+                }
+            });
+        }
+
+        // 2) Try customer portal (Customer model) - email or username
+        const customer = await Customer.findOne({
+            $or: [{ email: loginId }, { username: loginId }]
+        });
+
+        if (customer) {
+            console.log('Unified login matched Customer:', {
+                id: customer._id,
+                email: customer.email,
+                username: customer.username,
+                isActive: customer.isActive
+            });
+        }
+
+        if (customer) {
+            if (!customer.isActive) {
+                console.log('Unified login customer inactive:', customer._id);
+                return res.status(401).json({
+                    success: false,
+                    message: 'Account is not active. Please contact administrator.'
+                });
+            }
+
+            const isPasswordValid = await bcryptjs.compare(password, customer.password);
+            if (!isPasswordValid) {
+                console.log('Unified login customer password mismatch for', loginId);
+                return res.status(401).json({
+                    success: false,
+                    message: 'Invalid credentials'
+                });
+            }
+
+            const JWT_SECRET = process.env.JWT_SECRET;
+            const customerToken = jwt.sign(
+                {
+                    customerId: customer._id,
+                    username: customer.username,
+                    accountNo: customer.accountNo,
+                    type: 'customer'
+                },
+                JWT_SECRET,
+                { expiresIn: '24h' }
+            );
+
+            const customerResponse = customer.toObject();
+            delete customerResponse.password;
+            delete customerResponse.confirmPassword;
+
+            return res.json({
+                success: true,
+                message: 'Login successful',
+                token: customerToken,
+                role: 'customer',
+                userType: 'customer',
+                user: customerResponse
+            });
+        }
+
+        // 3) Try rider portal (Rider model) - identifier treated as riderCode
+        const rider = await Rider.findOne({ riderCode: loginId }).select('+password');
+
+        if (rider) {
+            if (!rider.active) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Your account has been deactivated. Please contact admin.'
+                });
+            }
+
+            const isMatch = await rider.comparePassword(password);
+            if (!isMatch) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Invalid credentials'
+                });
+            }
+
+            const riderToken = jwt.sign(
+                { id: rider._id },
+                process.env.JWT_SECRET || 'your-secret-key',
+                { expiresIn: process.env.JWT_EXPIRE || '30d' }
+            );
+
+            return res.json({
+                success: true,
+                message: 'Login successful',
+                token: riderToken,
+                role: 'rider',
+                userType: 'rider',
+                user: {
+                    id: rider._id,
+                    riderName: rider.riderName,
+                    riderCode: rider.riderCode,
+                    mobileNo: rider.mobileNo,
+                    active: rider.active
+                }
+            });
+        }
+
+        // If none matched
+        return res.status(401).json({
+            success: false,
+            message: 'Invalid credentials'
+        });
+    } catch (err) {
+        console.error('Unified login error:', err);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error',
             error: process.env.NODE_ENV === 'development' ? err.message : undefined
         });
     }

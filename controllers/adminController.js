@@ -1,4 +1,5 @@
 const UserAuth = require('../models/UserAuth');
+const Customer = require('../models/Customer');
 const bcrypt = require('bcrypt');
 
 /**
@@ -54,12 +55,21 @@ exports.createUser = async (req, res) => {
             });
         }
 
-        // Check if user already exists
+        // Check if user already exists in UserAuth
         const existingUser = await UserAuth.findOne({ $or: [{ email }, { username }] });
         if (existingUser) {
             return res.status(400).json({ 
                 success: false, 
                 message: "User with this email or username already exists" 
+            });
+        }
+
+        // Also ensure no customer already uses this email
+        const existingCustomerWithEmail = await Customer.findOne({ email });
+        if (existingCustomerWithEmail) {
+            return res.status(400).json({
+                success: false,
+                message: "This email is already used for a customer account"
             });
         }
 
