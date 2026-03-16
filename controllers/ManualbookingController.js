@@ -273,24 +273,60 @@ exports.createBooking = async (req, res) => {
 // Get all bookings (Admin) or user's bookings (Customer)
 exports.getAllBookings = async (req, res) => {
   try {
-    let query = {};
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 20;
+    const skip = (page - 1) * limit;
 
-    // If request is coming from authenticated customer portal, scope to that customer
-    if (req.customer) {
-      query.customerId = String(req.customer._id);
-    } else if (req.user && (req.user.role === "customer" || req.user.role === "codClientPortal")) {
-      // Fallback for other portals that might set role on req.user
-      query.customerId = String(req.user._id);
+    // Detect if this is a customer-scoped request (customer portal / COD client)
+    const isCustomerScope =
+      !!req.customer ||
+      (req.user && (req.user.role === "customer" || req.user.role === "codClientPortal"));
+
+    if (isCustomerScope) {
+      // Customer / COD client: only see their own bookings
+      const query = {};
+      if (req.customer) {
+        query.customerId = String(req.customer._id);
+      } else if (req.user) {
+        query.customerId = String(req.user._id);
+      }
+
+      const [bookings, total] = await Promise.all([
+        ManualBooking.find(query)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit),
+        ManualBooking.countDocuments(query)
+      ]);
+
+      return res.status(200).json({
+        success: true,
+        count: bookings.length,
+        total,
+        page,
+        totalPages: Math.ceil(total / limit),
+        data: bookings
+      });
     }
-    
-    const bookings = await ManualBooking.find(query)
-      .sort({ createdAt: -1 });
 
-    res.status(200).json({
-      success: true,
-      count: bookings.length,
-      data: bookings
-    });
+    // Admin side (GET /api/admin/manual-booking):
+    // return paginated manual bookings as a plain array so
+    // frontend GETALLMANUALBOOKING() can use response.data directly.
+    const [bookings, total] = await Promise.all([
+      ManualBooking.find()
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      ManualBooking.countDocuments()
+    ]);
+
+    // Preserve existing frontend contract: bare array as response body.
+    // If you later want total/page info on frontend, we can wrap this in an object.
+    res.setHeader("X-Total-Count", total);
+    res.setHeader("X-Page", page);
+    res.setHeader("X-Total-Pages", Math.ceil(total / limit));
+
+    return res.status(200).json(bookings);
 
   } catch (error) {
     console.error(error);
@@ -808,7 +844,6 @@ exports.bulkImportBookings = async (req, res) => {
 };
 
 // Manual Booking Stats (Admin or scoped customer)
-// Returns: total shipments, total COD amount, delivered & pending shipments
 exports.getManualBookingStats = async (req, res) => {
   try {
     const { dateFrom, dateTo } = req.query;
