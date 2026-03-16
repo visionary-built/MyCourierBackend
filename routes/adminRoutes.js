@@ -145,13 +145,15 @@ router.post("/manual-booking", manualBookingController.createBooking);
 router.get("/manual-booking", manualBookingController.getAllBookings);
 router.get("/manual-booking/stats", adminAuth, manualBookingController.getManualBookingStats);
 router.get("/manual-booking/search", manualBookingController.getBookingsWithFilters);
+
+// Manual Booking - Bulk Import
+// IMPORTANT: define before any dynamic :id route so "bulk-import" is not treated as an ID
+router.post("/manual-booking/bulk-import", upload.single('excelFile'), handleUploadError, manualBookingController.bulkImportBookings);
+
 router.get("/manual-booking/:id", manualBookingController.getBookingById);
 router.get("/manual-booking/consignment/:consignmentNo", manualBookingController.getBookingByConsignmentNo);
 router.put("/manual-booking/:id", manualBookingController.updateBooking);
 router.delete("/manual-booking/:id", manualBookingController.deleteBooking);
-
-// Manual Booking - Bulk Import
-router.post("/manual-booking/bulk-import", upload.single('excelFile'), handleUploadError, manualBookingController.bulkImportBookings);
 
     
 // Branch (Express Centre) Management - SuperAdmin only

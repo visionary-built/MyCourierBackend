@@ -17,6 +17,8 @@ exports.getAllBookings = async (req, res) => {
             sortOrder = 'desc'
         } = req.query;
 
+        const isCustomer = !!req.customer || req.userType === 'customer';
+
         let bookingStatusQuery = {};
         if (status) {
             bookingStatusQuery.status = status;
@@ -26,6 +28,10 @@ exports.getAllBookings = async (req, res) => {
         }
         if (originCity) {
             bookingStatusQuery.originCity = { $regex: originCity, $options: 'i' };
+        }
+        // If called from customer portal, restrict to that customer's account
+        if (isCustomer && req.customer && req.customer.accountNo) {
+            bookingStatusQuery.accountNo = req.customer.accountNo;
         }
         let DeliverySheetPhaseIQuery = {};
         if (status) {
@@ -47,6 +53,10 @@ exports.getAllBookings = async (req, res) => {
         }
         if (originCity) {
             manualBookingQuery.originCity = { $regex: originCity, $options: 'i' };
+        }
+        // Restrict manual bookings to this customer when in customer portal
+        if (isCustomer && req.customer && req.customer._id) {
+            manualBookingQuery.customerId = req.customer._id.toString();
         }
 
         const skip = (parseInt(page) - 1) * parseInt(limit);
