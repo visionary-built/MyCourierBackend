@@ -1,6 +1,8 @@
 const BookingStatus = require('../models/bookingStatus');
 const ManualBooking = require('../models/ManualBooking');
 const DeliverySheetPhaseI = require('../models/DeliverySheetPhaseI');
+const Customer = require('../models/Customer');
+const mongoose = require('mongoose');
 
 // Get all bookings
 exports.getAllBookings = async (req, res) => {
@@ -59,31 +61,54 @@ exports.getAllBookings = async (req, res) => {
             ManualBooking.countDocuments({})
         ]);
 
+        // Build a lookup map from customerId -> customer display name
+        const rawCustomerIds = manualBookingData.map(b => b.customerId).filter(Boolean);
+        const customerIds = [...new Set(rawCustomerIds.filter(id => mongoose.Types.ObjectId.isValid(id)))];
+
+        const customers = await Customer.find({ _id: { $in: customerIds } })
+            .select('brandName username contactPerson');
+        const customerNameMap = new Map(
+            customers.map(c => [
+                String(c._id),
+                c.brandName || c.username || c.contactPerson || 'Customer'
+            ])
+        );
+
         // Normalize manual bookings to match BookingStatus format
-        const normalizedManualBookings = manualBookingData.map(booking => ({
-            _id: booking._id,
-            consignmentNumber: booking.consignmentNo,
-            consigneeName: booking.consigneeName,
-            consigneeAddress: booking.consigneeAddress,
-            consigneeMobile: booking.consigneeMobile,
-            pieces: booking.pieces,
-            weight: booking.weight,
-            codAmount: booking.codAmount,
-            destinationCity: booking.destinationCity,
-            accountNo: 'MANUAL',
-            agentName: booking.createdBy || 'Manual Entry',
-            status: booking.status,
-            bookingDate: booking.date || booking.createdAt,
-            createdAt: booking.createdAt,
-            updatedAt: booking.updatedAt,
-            remarks: booking.remarks || 'Manual Booking',
-            deliveryDate: booking.updatedAt,
-            id: booking._id,
-            source: 'manual_booking',
-            serviceType: booking.serviceType,
-            originCity: booking.originCity,
-            productDetail: booking.productDetail
-        }));
+        const normalizedManualBookings = manualBookingData.map(booking => {
+            const customerName =
+                customerNameMap.get(String(booking.customerId)) ||
+                booking.senderName ||
+                'Manual Entry';
+
+            return {
+                _id: booking._id,
+                consignmentNumber: booking.consignmentNo,
+                consigneeName: booking.consigneeName,
+                consigneeAddress: booking.consigneeAddress,
+                consigneeMobile: booking.consigneeMobile,
+                pieces: booking.pieces,
+                weight: booking.weight,
+                codAmount: booking.codAmount,
+                destinationCity: booking.destinationCity,
+                // For manual bookings we don't have a true accountNo on the document;
+                // keep explicit marker but you can change this later to real account numbers.
+                accountNo: 'MANUAL',
+                // Use real customer/brand name where possible
+                agentName: customerName,
+                status: booking.status,
+                bookingDate: booking.date || booking.createdAt,
+                createdAt: booking.createdAt,
+                updatedAt: booking.updatedAt,
+                remarks: booking.remarks || 'Manual Booking',
+                deliveryDate: booking.updatedAt,
+                id: booking._id,
+                source: 'manual_booking',
+                serviceType: booking.serviceType,
+                originCity: booking.originCity,
+                productDetail: booking.productDetail
+            };
+        });
 
         // Combine both booking types
         const allBookings = [...bookingStatusData, ...normalizedManualBookings];
@@ -241,7 +266,6 @@ exports.searchBookings = async (req, res) => {
             }
             if (dateFilter.$gte) query.bookingDate = { ...(query.bookingDate || {}), $gte: dateFilter.$gte };
             if (dateFilter.$lt) query.bookingDate = { ...(query.bookingDate || {}), $lt: dateFilter.$lt };
-            // Apply to ManualBooking 'date' field as well
             if (dateFilter.$gte) manualQuery.date = { ...(manualQuery.date || {}), $gte: dateFilter.$gte };
             if (dateFilter.$lt) manualQuery.date = { ...(manualQuery.date || {}), $lt: dateFilter.$lt };
         }
@@ -256,30 +280,49 @@ exports.searchBookings = async (req, res) => {
         ]);
 
         // Normalize manual bookings
-        const normalizedManualBookings = mbDocs.map(booking => ({
-            _id: booking._id,
-            consignmentNumber: booking.consignmentNo,
-            consigneeName: booking.consigneeName,
-            consigneeAddress: booking.consigneeAddress,
-            consigneeMobile: booking.consigneeMobile,
-            pieces: booking.pieces,
-            weight: booking.weight,
-            codAmount: booking.codAmount,
-            destinationCity: booking.destinationCity,
-            accountNo: 'MANUAL',
-            agentName: booking.createdBy || 'Manual Entry',
-            status: booking.status,
-            bookingDate: booking.date || booking.createdAt,
-            createdAt: booking.createdAt,
-            updatedAt: booking.updatedAt,
-            remarks: booking.remarks || 'Manual Booking',
-            deliveryDate: booking.updatedAt,
-            id: booking._id,
-            source: 'manual_booking',
-            serviceType: booking.serviceType,
-            originCity: booking.originCity,
-            productDetail: booking.productDetail
-        }));
+        const rawSearchCustomerIds = mbDocs.map(b => b.customerId).filter(Boolean);
+        const searchCustomerIds = [...new Set(rawSearchCustomerIds.filter(id => mongoose.Types.ObjectId.isValid(id)))];
+
+        const searchCustomers = await Customer.find({ _id: { $in: searchCustomerIds } })
+            .select('brandName username contactPerson');
+        const searchCustomerNameMap = new Map(
+            searchCustomers.map(c => [
+                String(c._id),
+                c.brandName || c.username || c.contactPerson || 'Customer'
+            ])
+        );
+
+        const normalizedManualBookings = mbDocs.map(booking => {
+            const customerName =
+                searchCustomerNameMap.get(String(booking.customerId)) ||
+                booking.senderName ||
+                'Manual Entry';
+
+            return {
+                _id: booking._id,
+                consignmentNumber: booking.consignmentNo,
+                consigneeName: booking.consigneeName,
+                consigneeAddress: booking.consigneeAddress,
+                consigneeMobile: booking.consigneeMobile,
+                pieces: booking.pieces,
+                weight: booking.weight,
+                codAmount: booking.codAmount,
+                destinationCity: booking.destinationCity,
+                accountNo: 'MANUAL',
+                agentName: customerName,
+                status: booking.status,
+                bookingDate: booking.date || booking.createdAt,
+                createdAt: booking.createdAt,
+                updatedAt: booking.updatedAt,
+                remarks: booking.remarks || 'Manual Booking',
+                deliveryDate: booking.updatedAt,
+                id: booking._id,
+                source: 'manual_booking',
+                serviceType: booking.serviceType,
+                originCity: booking.originCity,
+                productDetail: booking.productDetail
+            };
+        });
 
         // Combine and paginate in-memory (consistent with getAllBookings)
         const combined = [...bsDocs, ...normalizedManualBookings];
