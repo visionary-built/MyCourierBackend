@@ -681,9 +681,9 @@ function generatePDFInvoice(res, invoiceData, type = 'agent') {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=invoice-${invoiceData.invoiceNumber}.pdf`);
     doc.pipe(res);
-    doc.fontSize(20).font('Helvetica-Bold').text('TEZLIFT COURIER SERVICE', { align: 'center' });
+    doc.fontSize(20).font('Helvetica-Bold').text('My COURIER SERVICE', { align: 'center' });
     doc.fontSize(12).font('Helvetica').text('123 Shipping St, City, Country', { align: 'center' });
-    doc.fontSize(10).text('Phone: +92-XXX-XXXXXXX | Email: info@tezlift.com', { align: 'center' });
+    doc.fontSize(10).text('Phone: +92-XXX-XXXXXXX | Email: info@mycourier.com', { align: 'center' });
     doc.moveDown(1);
 
     doc.fontSize(16).font('Helvetica-Bold').text('INVOICE', { align: 'center' });
@@ -771,7 +771,7 @@ function generatePDFInvoice(res, invoiceData, type = 'agent') {
     doc.text(`Grand Total: Rs. ${invoiceData.summary.grandTotal}`, 50, doc.y);
 
     doc.moveDown(2);
-    doc.font('Helvetica-Oblique').fontSize(8).text('Thank you for choosing TEZLIFT COURIER SERVICE', { align: 'center' });
+    doc.font('Helvetica-Oblique').fontSize(8).text('Thank you for choosing My COURIER SERVICE', { align: 'center' });
     doc.text('This is a computer generated invoice', { align: 'center' });
 
     doc.end();
@@ -964,9 +964,9 @@ function generateCodClientPDFInvoice(res, invoiceData) {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=invoice-${invoiceData.invoiceNumber}.pdf`);
     doc.pipe(res);
-    doc.fontSize(20).font('Helvetica-Bold').text('TEZLIFT COURIER SERVICE', { align: 'center' });
+    doc.fontSize(20).font('Helvetica-Bold').text('My COURIER SERVICE', { align: 'center' });
     doc.fontSize(12).font('Helvetica').text('123 Shipping St, City, Country', { align: 'center' });
-    doc.fontSize(10).text('Phone: +92-XXX-XXXXXXX | Email: info@tezlift.com', { align: 'center' });
+    doc.fontSize(10).text('Phone: +92-XXX-XXXXXXX | Email: info@mycourier.com', { align: 'center' });
     doc.moveDown(1);
 
     doc.fontSize(16).font('Helvetica-Bold').text('COD CLIENT INVOICE', { align: 'center' });
@@ -1042,7 +1042,7 @@ function generateCodClientPDFInvoice(res, invoiceData) {
     doc.text(`NET PAYABLE: Rs. ${invoiceData.summary.netPayable}`, 300, doc.y);
 
     doc.moveDown(2);
-    doc.font('Helvetica-Oblique').fontSize(8).text('Thank you for choosing TEZLIFT COURIER SERVICE', { align: 'center' });
+    doc.font('Helvetica-Oblique').fontSize(8).text('Thank you for choosing My COURIER SERVICE', { align: 'center' });
     doc.text('This is a computer generated invoice', { align: 'center' });
 
     doc.end();

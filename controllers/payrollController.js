@@ -354,7 +354,7 @@ exports.getPayrollSlip = async (req, res) => {
     );
     doc.pipe(res);
 
-    doc.fontSize(18).text('TEZLIFT COURIER SERVICE', { align: 'center' });
+    doc.fontSize(18).text('My COURIER SERVICE', { align: 'center' });
     doc.moveDown(0.5);
     doc.fontSize(14).text('Salary Slip', { align: 'center' });
     doc.moveDown(1);
