@@ -391,7 +391,7 @@ exports.generateAddressLabel = async (req, res) => {
         res.setHeader('Content-Disposition', `inline; filename=label-${consignmentNumber}.pdf`);
         doc.pipe(res);
         doc.rect(5, 5, 290, 390).stroke();
-        doc.fontSize(12).text('TEZLIFT COURIER SERVICE', { align: 'center' });
+        doc.fontSize(12).text('My COURIER SERVICE', { align: 'center' });
         doc.fontSize(10).text('123 Shipping St, City, Country', { align: 'center' });
         doc.moveDown(0.5);
         doc.moveTo(10, 60).lineTo(290, 60).stroke();
@@ -415,7 +415,7 @@ exports.generateAddressLabel = async (req, res) => {
             .text(`Contact: ${booking.consigneeMobile || 'N/A'}`, 15, 360);
         doc.moveTo(10, 380).lineTo(290, 380).stroke();
         doc.font('Helvetica-Oblique').fontSize(8)
-            .text('Thank you for choosing TEZLIFT COURIER SERVICE', { align: 'center' });
+            .text('Thank you for choosing My COURIER SERVICE', { align: 'center' });
         doc.end();
 
     } catch (error) {
