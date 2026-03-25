@@ -147,7 +147,6 @@ router.get("/manual-booking/stats", adminAuth, manualBookingController.getManual
 router.get("/manual-booking/search", manualBookingController.getBookingsWithFilters);
 
 // Manual Booking - Bulk Import
-// IMPORTANT: define before any dynamic :id route so "bulk-import" is not treated as an ID
 router.post("/manual-booking/bulk-import", upload.single('excelFile'), handleUploadError, manualBookingController.bulkImportBookings);
 
 router.get("/manual-booking/:id", manualBookingController.getBookingById);
