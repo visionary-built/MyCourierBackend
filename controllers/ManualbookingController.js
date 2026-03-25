@@ -871,7 +871,7 @@ exports.getManualBookingStats = async (req, res) => {
     }
 
     const bookings = await ManualBooking.find(query)
-      .select("status codAmount")
+      .select("status codAmount customerId")
       .lean();
 
     const totalShipments = bookings.length;
@@ -879,11 +879,69 @@ exports.getManualBookingStats = async (req, res) => {
     let deliveredShipments = 0;
     let pendingShipments = 0;
 
+    /** @type {Map<string, { bookingCount: number, totalCodAmount: number, deliveredCount: number, pendingCount: number }>} */
+    const byCustomer = new Map();
+
     bookings.forEach((b) => {
       totalCodAmount += b.codAmount || 0;
       if (b.status === "delivered") deliveredShipments += 1;
       if (b.status === "pending") pendingShipments += 1;
+
+      const key = b.customerId != null && String(b.customerId).trim() !== ""
+        ? String(b.customerId)
+        : "__unassigned__";
+      if (!byCustomer.has(key)) {
+        byCustomer.set(key, {
+          bookingCount: 0,
+          totalCodAmount: 0,
+          deliveredCount: 0,
+          pendingCount: 0
+        });
+      }
+      const agg = byCustomer.get(key);
+      agg.bookingCount += 1;
+      agg.totalCodAmount += b.codAmount || 0;
+      if (b.status === "delivered") agg.deliveredCount += 1;
+      if (b.status === "pending") agg.pendingCount += 1;
     });
+
+    const validObjectIds = [...byCustomer.keys()].filter(
+      (id) => id !== "__unassigned__" && mongoose.Types.ObjectId.isValid(id)
+    );
+    const customers = await Customer.find({ _id: { $in: validObjectIds } })
+      .select("brandName username contactPerson accountNo")
+      .lean();
+    const customerLabel = new Map(
+      customers.map((c) => [
+        String(c._id),
+        c.brandName || c.username || c.contactPerson || c.accountNo || "Customer"
+      ])
+    );
+
+    const customerBookingDetails = [...byCustomer.entries()]
+      .map(([customerIdKey, agg]) => {
+        const isUnassigned = customerIdKey === "__unassigned__";
+        const isValidId = !isUnassigned && mongoose.Types.ObjectId.isValid(customerIdKey);
+        const customerName = isUnassigned
+          ? "Unassigned"
+          : isValidId
+            ? customerLabel.get(customerIdKey) || "Unknown customer"
+            : customerIdKey;
+
+        return {
+          customerId: isUnassigned ? null : customerIdKey,
+          customerName,
+          bookingCount: agg.bookingCount,
+          totalCodAmount: agg.totalCodAmount,
+          deliveredCount: agg.deliveredCount,
+          pendingCount: agg.pendingCount
+        };
+      })
+      .sort((a, b) => b.bookingCount - a.bookingCount);
+
+    const totalUniqueCustomers = customerBookingDetails.filter(
+      (row) => row.customerId != null
+    ).length;
 
     res.status(200).json({
       success: true,
@@ -893,6 +951,8 @@ exports.getManualBookingStats = async (req, res) => {
         totalCodAmount,
         deliveredShipments,
         pendingShipments,
+        totalUniqueCustomers,
+        customerBookingDetails,
         dateRange: {
           from: dateFrom || null,
           to: dateTo || null
