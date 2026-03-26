@@ -264,8 +264,29 @@ exports.unifiedLogin = async (req, res) => {
         if (userAuth) {
             const passwordMatch = await bcrypt.compare(password, userAuth.password);
             if (!passwordMatch) {
-                console.log('Unified login UserAuth password mismatch for', loginId);
-                return res.status(401).json({ success: false, message: "Invalid credentials" });
+                // Bootstrap fallback: allow .env superadmin password for bootstrap email
+                // even if an older DB hash exists, then sync DB hash.
+                if (loginId === process.env.EMAIL) {
+                    const envPasswordMatch = await bcrypt.compare(password, process.env.ADMIN_PASSWORD || '');
+                    if (envPasswordMatch) {
+                        console.log('Unified login using bootstrap .env password for', loginId);
+                        try {
+                            userAuth.password = process.env.ADMIN_PASSWORD;
+                            userAuth.role = userAuth.role || 'superAdmin';
+                            userAuth.isAdmin = true;
+                            await userAuth.save();
+                            console.log('Synced UserAuth password hash from .env for', loginId);
+                        } catch (syncErr) {
+                            console.error('Failed to sync bootstrap password to UserAuth:', syncErr.message);
+                        }
+                    } else {
+                        console.log('Unified login UserAuth password mismatch for', loginId);
+                        return res.status(401).json({ success: false, message: "Invalid credentials" });
+                    }
+                } else {
+                    console.log('Unified login UserAuth password mismatch for', loginId);
+                    return res.status(401).json({ success: false, message: "Invalid credentials" });
+                }
             }
 
             const role = userAuth.role;

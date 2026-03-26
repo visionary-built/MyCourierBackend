@@ -2,6 +2,33 @@ const BookingStatus = require('../models/bookingStatus');
 const ManualBooking = require('../models/ManualBooking');
 const DeliverySheetPhaseI = require('../models/DeliverySheetPhaseI');
 
+// Normalize BookingStatus/ManualBooking into a single tracking payload shape
+const normalizeTracking = (booking, source) => {
+  const obj = booking.toObject ? booking.toObject() : booking;
+
+  return {
+    _id: obj._id,
+    consignmentNumber: obj.consignmentNumber || obj.consignmentNo,
+    source,
+    status: obj.status,
+    statusHistory: Array.isArray(obj.statusHistory) ? obj.statusHistory : [],
+    bookingDate: obj.bookingDate || obj.date || obj.createdAt,
+    deliveryDate: obj.deliveryDate || obj.updatedAt,
+    remarks: obj.remarks,
+    consigneeName: obj.consigneeName,
+    consigneeMobile: obj.consigneeMobile,
+    consigneeAddress: obj.consigneeAddress,
+    destinationCity: obj.destinationCity,
+    originCity: obj.originCity,
+    agentName: obj.agentName || obj.createdBy,
+    pieces: obj.pieces,
+    weight: obj.weight,
+    codAmount: obj.codAmount,
+    productDetail: obj.productDetail,
+    createdAt: obj.createdAt
+  };
+};
+
 // Get single consignment by ID
 exports.getTrackingById = async (req, res) => {
   try {
@@ -13,20 +40,29 @@ exports.getTrackingById = async (req, res) => {
       });
     }
 
-    const booking = await BookingStatus.findById(id);
-
+    let booking = await BookingStatus.findById(id);
     if (!booking) {
-      return res.status(404).json({ 
-        success: false, 
-        message: `No booking found with ID: ${id}`,
-        data: null
+      // Fallback: ManualBooking by id
+      const manual = await ManualBooking.findById(id);
+      if (!manual) {
+        return res.status(404).json({
+          success: false,
+          message: `No booking found with ID: ${id}`,
+          data: null
+        });
+      }
+      booking = manual;
+      return res.status(200).json({
+        success: true,
+        message: 'Tracking data retrieved successfully',
+        data: normalizeTracking(booking, 'manual_booking')
       });
     }
 
     return res.status(200).json({ 
       success: true, 
       message: 'Tracking data retrieved successfully',
-      data: booking 
+      data: normalizeTracking(booking, 'booking_status')
     });
   } catch (error) {
     console.error('Error in getTrackingById:', error);
@@ -49,22 +85,35 @@ exports.getTrackingByConsignmentNumber = async (req, res) => {
       });
     }
 
-    const booking = await BookingStatus.findOne({ 
+    let booking = await BookingStatus.findOne({
       consignmentNumber: consignmentNumber.toUpperCase() 
     });
 
     if (!booking) {
-      return res.status(404).json({ 
-        success: false, 
-        message: `No booking found with consignment number: ${consignmentNumber}`,
-        data: null
+      // Fallback: ManualBooking by consignmentNo
+      const manual = await ManualBooking.findOne({
+        consignmentNo: consignmentNumber.toUpperCase()
+      });
+
+      if (!manual) {
+        return res.status(404).json({
+          success: false,
+          message: `No booking found with consignment number: ${consignmentNumber}`,
+          data: null
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Tracking data retrieved successfully',
+        data: normalizeTracking(manual, 'manual_booking')
       });
     }
 
     return res.status(200).json({ 
       success: true, 
       message: 'Tracking data retrieved successfully',
-      data: booking 
+      data: normalizeTracking(booking, 'booking_status')
     });
   } catch (error) {
     console.error('Error in getTrackingByConsignmentNumber:', error);
