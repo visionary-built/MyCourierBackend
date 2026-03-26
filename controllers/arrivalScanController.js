@@ -1,5 +1,6 @@
 const Rider = require('../models/Rider');
 const ParcelService = require('../services/parcelService');
+const ManualBooking = require('../models/ManualBooking');
 
 exports.searchParcels = async (req, res) => {
   try {
@@ -10,6 +11,54 @@ exports.searchParcels = async (req, res) => {
       status
     };
     const result = await ParcelService.searchParcels(searchCriteria, page, limit);
+
+    // Fallback: if not found in arrival scan, allow direct search in ManualBooking
+    // so newly created manual consignments can still be discovered here.
+    if (result.parcels.length === 0 && consignmentNumber) {
+      const manual = await ManualBooking.findOne({
+        consignmentNo: consignmentNumber.toUpperCase().trim()
+      }).lean();
+
+      if (manual) {
+        const manualParcel = {
+          _id: manual._id,
+          consignmentNumber: manual.consignmentNo,
+          rider: manual.assignedTo || null,
+          status: manual.status || 'pending',
+          destinationCity: manual.destinationCity,
+          originCity: manual.originCity,
+          consigneeName: manual.consigneeName,
+          consigneeMobile: manual.consigneeMobile,
+          codAmount: manual.codAmount || 0,
+          remarks: manual.remarks || '',
+          source: 'manual_booking',
+          createdAt: manual.createdAt,
+          updatedAt: manual.updatedAt
+        };
+
+        return res.status(200).json({
+          success: true,
+          message: 'Parcels retrieved successfully',
+          data: {
+            parcels: [manualParcel],
+            pagination: {
+              currentPage: 1,
+              totalPages: 1,
+              totalCount: 1,
+              hasNextPage: false,
+              hasPreviousPage: false,
+              limit: parseInt(limit)
+            }
+          },
+          searchCriteria: {
+            rider: rider || null,
+            consignmentNumber: consignmentNumber || null,
+            status: status || null
+          }
+        });
+      }
+    }
+
     if (result.parcels.length === 0) {
       let message = 'No parcels found';
       if (consignmentNumber) {
@@ -174,7 +223,32 @@ exports.getParcelById = async (req, res) => {
       });
     }
 
-    const parcel = await ParcelService.getParcelByConsignmentNumber(consignmentNumber);
+    let parcel = await ParcelService.getParcelByConsignmentNumber(consignmentNumber);
+
+    // Fallback for manual bookings that are not yet in arrival scan collection
+    if (!parcel) {
+      const manual = await ManualBooking.findOne({
+        consignmentNo: consignmentNumber.toUpperCase().trim()
+      }).lean();
+
+      if (manual) {
+        parcel = {
+          _id: manual._id,
+          consignmentNumber: manual.consignmentNo,
+          rider: manual.assignedTo || null,
+          status: manual.status || 'pending',
+          destinationCity: manual.destinationCity,
+          originCity: manual.originCity,
+          consigneeName: manual.consigneeName,
+          consigneeMobile: manual.consigneeMobile,
+          codAmount: manual.codAmount || 0,
+          remarks: manual.remarks || '',
+          source: 'manual_booking',
+          createdAt: manual.createdAt,
+          updatedAt: manual.updatedAt
+        };
+      }
+    }
 
     if (!parcel) {
       return res.status(404).json({
