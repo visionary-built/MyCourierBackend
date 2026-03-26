@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const path = require('path');
 
 const arrivalScanController = require('../controllers/arrivalScanController');
 const customerController = require('../controllers/customerController');
@@ -20,6 +22,56 @@ const { getTrackingById, getTrackingByConsignmentNumber, getAllConsignments } = 
 const invoiceController = require('../controllers/invoiceController');
 const auth = require('../controllers/auth');
 
+
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+      cb(null, 'uploads/');
+    },
+    filename: function (req, file, cb) {
+      cb(null, Date.now() + '-' + file.originalname);
+    }
+  });
+  
+  const upload = multer({ 
+    storage: storage,
+    fileFilter: function (req, file, cb) {
+      const allowedTypes = ['.xlsx', '.xls'];
+      const fileExt = path.extname(file.originalname).toLowerCase();
+      if (allowedTypes.includes(fileExt)) {
+        cb(null, true);
+      } else {
+        cb(new Error('Only Excel files (.xlsx, .xls) are allowed'));
+      }
+    },
+    limits: {
+      fileSize: 10 * 1024 * 1024 // 10MB limit
+    }
+  });
+  
+  // Error handling middleware for multer
+  const handleUploadError = (err, req, res, next) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({
+          success: false,
+          message: 'File too large. Maximum size is 10MB'
+        });
+      }
+    }
+    if (err.message === 'Only Excel files (.xlsx, .xls) are allowed') {
+      return res.status(400).json({
+        success: false,
+        message: err.message
+      });
+    }
+    next(err);
+  };
+
+
+
+
 // Public login route for Operation Portal
 router.post('/operation-login', auth.operationPortalLogin);
 
@@ -39,7 +91,8 @@ router.post('/manual-booking', manualBookingController.createBooking);
 router.get('/manual-booking', manualBookingController.getAllBookings);
 router.get('/manual-booking/:id', manualBookingController.getBookingById);
 router.get("/manual-booking/stats",  manualBookingController.getManualBookingStats);
-
+// Manual Booking - Bulk Import
+router.post("/manual-booking/bulk-import", upload.single('excelFile'), handleUploadError, manualBookingController.bulkImportBookings);
 
 // 4. Booking Status
 router.post('/bookings', bookingStatusController.createBooking);

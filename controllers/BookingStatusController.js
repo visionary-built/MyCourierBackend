@@ -4,6 +4,59 @@ const DeliverySheetPhaseI = require('../models/DeliverySheetPhaseI');
 const Customer = require('../models/Customer');
 const mongoose = require('mongoose');
 
+// Detailed tracking stages accepted from UI
+const TRACKING_STAGES = [
+    'Booking',
+    'Received By Rider',
+    'Arrived At Facility',
+    'Bagging',
+    'In Transit',
+    'Unload At Destination',
+    'Sorting For Rider',
+    '1st Attempt Delivery',
+    'Delivered',
+    'Not At Home',
+    'Cash Not Available',
+    'Not Responding',
+    'SMS Send',
+    '2nd Attempt Out For Delivery',
+    'Return To Office',
+    'Return To Origin',
+    'Return To Shipper'
+];
+
+const BASIC_STATUSES = ['pending', 'in-transit', 'delivered', 'returned', 'cancelled'];
+
+const normalizeStatusInput = (value = '') => String(value).trim().toLowerCase();
+
+// Keep DB status enum-compatible while preserving detailed stage in statusHistory
+const mapTrackingStageToDbStatus = (rawStatus) => {
+    const normalized = normalizeStatusInput(rawStatus);
+    if (normalized === 'delivered') return 'delivered';
+    if (
+        normalized === 'return to shipper' ||
+        normalized === 'return to origin' ||
+        normalized === 'return to office'
+    ) return 'returned';
+    if (
+        normalized === 'in transit' ||
+        normalized === 'received by rider' ||
+        normalized === 'arrived at facility' ||
+        normalized === 'bagging' ||
+        normalized === 'unload at destination' ||
+        normalized === 'sorting for rider' ||
+        normalized === '1st attempt delivery' ||
+        normalized === '2nd attempt out for delivery' ||
+        normalized === 'not at home' ||
+        normalized === 'cash not available' ||
+        normalized === 'not responding' ||
+        normalized === 'sms send'
+    ) return 'in-transit';
+    if (normalized === 'booking' || normalized === 'pending') return 'pending';
+    if (normalized === 'cancelled' || normalized === 'canceled') return 'cancelled';
+    return null;
+};
+
 // Get all bookings
 exports.getAllBookings = async (req, res) => {
     try {
@@ -517,10 +570,27 @@ exports.updateBookingStatus = async (req, res) => {
             });
         }
 
-        const updateFields = { status };
+        const normalizedInput = normalizeStatusInput(status);
+        const matchedDetailedStage = TRACKING_STAGES.find(
+            (stage) => normalizeStatusInput(stage) === normalizedInput
+        );
+        const matchedBasicStatus = BASIC_STATUSES.find(
+            (s) => normalizeStatusInput(s) === normalizedInput
+        );
+        const dbStatus = mapTrackingStageToDbStatus(status);
+
+        if (!matchedDetailedStage && !matchedBasicStatus && !dbStatus) {
+            return res.status(400).json({
+                success: false,
+                message: `Invalid status. Valid statuses are: ${[...TRACKING_STAGES, ...BASIC_STATUSES].join(', ')}`
+            });
+        }
+
+        // Persist enum-safe main status; detailed stage goes to statusHistory
+        const updateFields = { status: dbStatus || matchedBasicStatus || 'pending' };
 
         if (remarks) updateFields.remarks = remarks;
-        if (status === 'delivered') updateFields.deliveryDate = new Date();
+        if (normalizeStatusInput(updateFields.status) === 'delivered') updateFields.deliveryDate = new Date();
 
         if (req.userType === 'rider') {
             // Check if rider has access to this consignment in any of their recent delivery sheets
@@ -545,7 +615,7 @@ exports.updateBookingStatus = async (req, res) => {
                 $set: updateFields,
                 $push: {
                     statusHistory: {
-                        status,
+                        status: matchedDetailedStage || status,
                         timestamp: new Date(),
                         remarks: remarks || undefined,
                         updatedBy: req.user?.id || 'system'
@@ -561,10 +631,10 @@ exports.updateBookingStatus = async (req, res) => {
             manualUpdated = await ManualBooking.findOneAndUpdate(
                 { consignmentNo: consignmentNumber.toUpperCase() },
                 {
-                    $set: { status: status.toLowerCase() },
+                    $set: { status: updateFields.status },
                     $push: {
                         statusHistory: {
-                            status: status.toLowerCase(),
+                            status: matchedDetailedStage || status,
                             timestamp: new Date(),
                             remarks: remarks || undefined,
                             updatedBy: req.user?.id || 'system'
