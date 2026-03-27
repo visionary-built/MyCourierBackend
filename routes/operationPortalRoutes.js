@@ -20,6 +20,11 @@ const overnightServiceController = require('../controllers/overnightServiceContr
 const rateCardController = require('../controllers/rateCardController');
 const { getTrackingById, getTrackingByConsignmentNumber, getAllConsignments } = require('../controllers/trackingController');
 const invoiceController = require('../controllers/invoiceController');
+const cargoController = require('../controllers/cargoController');
+const firstMailArrivalController = require('../controllers/firstMailArrivalController');
+const firstMailController = require('../controllers/firstMailController');
+const lastMailNotesController = require('../controllers/lastMailNotesController');
+const statusController = require('../controllers/statusController');
 const auth = require('../controllers/auth');
 
 
@@ -88,6 +93,7 @@ router.get('/customers', customerController.getAllCustomers);
 
 // 3. Create Booking/Manual Booking
 router.post('/manual-booking', manualBookingController.createBooking);
+router.post('/manual-booking/walk-in', manualBookingController.createWalkInBooking);
 router.get('/manual-booking', manualBookingController.getAllBookings);
 router.get('/manual-booking/:id', manualBookingController.getBookingById);
 router.get("/manual-booking/stats",  manualBookingController.getManualBookingStats);
@@ -159,5 +165,35 @@ router.get('/invoice/generate', invoiceController.generateInvoice);
 router.get('/invoice/generate-rider', invoiceController.generateRiderInvoice);
 router.get('/invoice', invoiceController.getAllInvoices);
 
+// Cargo Module
+router.post('/cargo/bags', cargoController.createBag);
+router.put('/cargo/bags/:id/in-transit', cargoController.markBagInTransit);
+router.get('/cargo/bags/history', cargoController.getBagHistory);
+router.post('/cargo/manifests', cargoController.createManifest);
+router.get('/cargo/manifests/pending-report', cargoController.getPendingManifestReport);
+router.get('/cargo/manifests/history', cargoController.getManifestHistory);
+
+// First Mail — origin / destination arrival
+router.post('/first-mail/origin-arrival', firstMailArrivalController.recordOriginArrival);
+router.post('/first-mail/destination-arrival', firstMailArrivalController.recordDestinationArrival);
+router.get('/first-mail/pickup-history', firstMailController.getPickupHistory);
+
+// Last Mail — delivery note, pending cash, return note
+router.post('/last-mail/delivery-notes', lastMailNotesController.createDeliveryNote);
+router.post('/last-mail/delivery-notes/:id/scan', lastMailNotesController.scanDeliveryNote);
+router.get('/last-mail/delivery-notes/:id', lastMailNotesController.getDeliveryNoteById);
+router.get('/last-mail/delivery-notes', lastMailNotesController.listDeliveryNotes);
+router.put('/last-mail/delivery-notes/:id/close', lastMailNotesController.closeDeliveryNote);
+router.get('/last-mail/pending-cash-collection', lastMailNotesController.getPendingCashCollection);
+router.post('/last-mail/pending-cash-collection/collect', lastMailNotesController.recordCashCollection);
+router.post('/last-mail/return-notes', lastMailNotesController.createReturnNote);
+router.post('/last-mail/return-notes/:id/scan', lastMailNotesController.scanReturnNote);
+router.get('/last-mail/return-notes/:id', lastMailNotesController.getReturnNoteById);
+router.get('/last-mail/return-notes', lastMailNotesController.listReturnNotes);
+router.put('/last-mail/return-notes/:id/close', lastMailNotesController.closeReturnNote);
+
+// Status — quick scan & scanning history
+router.get('/status/quick-scan/:consignmentNumber', statusController.quickScan);
+router.get('/status/scanning-history', statusController.getScanningHistory);
 
 module.exports = router;

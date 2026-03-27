@@ -3,6 +3,8 @@ const ManualBooking = require('../models/ManualBooking');
 const DeliverySheetPhaseI = require('../models/DeliverySheetPhaseI');
 const Customer = require('../models/Customer');
 const mongoose = require('mongoose');
+const { getCargoContext } = require('../services/cargoLinkageService');
+const { getArrivalSummaryFromHistory } = require('../services/arrivalEventsService');
 
 // Detailed tracking stages accepted from UI
 const TRACKING_STAGES = [
@@ -494,6 +496,7 @@ exports.getBookingByConsignmentNumber = async (req, res) => {
             booking = {
                 _id: manual._id,
                 consignmentNumber: manual.consignmentNo,
+                statusHistory: manual.statusHistory || [],
                 consigneeName: manual.consigneeName,
                 consigneeAddress: manual.consigneeAddress,
                 consigneeMobile: manual.consigneeMobile,
@@ -540,6 +543,11 @@ exports.getBookingByConsignmentNumber = async (req, res) => {
         } else {
             bookingObj.deliverySheet = null;
         }
+
+        const cargo = await getCargoContext(bookingObj.consignmentNumber);
+        bookingObj.cargo = cargo;
+        const hist = bookingObj.statusHistory || [];
+        bookingObj.arrival = getArrivalSummaryFromHistory(hist);
 
         res.status(200).json({
             success: true,
@@ -663,16 +671,25 @@ exports.updateBookingStatus = async (req, res) => {
             console.error("Error updating delivery sheet status:", deliverySheetError);
         }
 
-        res.status(200).json({
-            success: true,
-            message: 'Booking status updated successfully',
-            data: booking || {
+        const cnUpper = consignmentNumber.toUpperCase();
+        const cargo = await getCargoContext(cnUpper);
+        const payload = booking
+            ? booking.toObject()
+            : {
                 _id: manualUpdated._id,
                 consignmentNumber: manualUpdated.consignmentNo,
                 status: manualUpdated.status,
                 remarks: manualUpdated.remarks,
                 updatedAt: manualUpdated.updatedAt
-            }
+            };
+
+        const hist = booking ? booking.statusHistory : manualUpdated.statusHistory;
+        const arrival = getArrivalSummaryFromHistory(hist || []);
+
+        res.status(200).json({
+            success: true,
+            message: 'Booking status updated successfully',
+            data: { ...payload, cargo, arrival }
         });
 
     } catch (error) {

@@ -71,6 +71,8 @@ const ManualBookingSchema = new mongoose.Schema({
       updatedBy: { type: String }
     }
   ],
+  /** Set when COD is recorded as collected at office (Last Mail — pending cash). */
+  cashCollectedAt: { type: Date },
 }, { timestamps: true });
 
 ManualBookingSchema.pre("save", function (next) {

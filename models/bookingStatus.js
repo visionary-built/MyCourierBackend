@@ -84,6 +84,10 @@ const bookingStatusSchema = new mongoose.Schema({
     deliveryDate: {
         type: Date
     },
+    /** Set when COD is recorded as collected at office (Last Mail — pending cash). */
+    cashCollectedAt: {
+        type: Date
+    },
     remarks: {
         type: String,
         trim: true

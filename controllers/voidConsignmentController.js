@@ -1,6 +1,7 @@
 const BookingStatus = require('../models/bookingStatus');
 const ManualBooking = require('../models/ManualBooking');
 const mongoose = require('mongoose');
+const { detachConsignmentFromCargo } = require('../services/cargoLinkageService');
 
 const autoVoidCriticalConsignments = async (req, res, next) => {
     const session = await mongoose.startSession();
@@ -306,6 +307,15 @@ exports.voidConsignment = [
             );
         } catch (manualBookingError) {
             console.error('Error updating manual booking:', manualBookingError);
+        }
+
+        try {
+            await detachConsignmentFromCargo(consignmentNumber.toUpperCase(), {
+                reason: 'consignment_voided',
+                source: 'void_consignment'
+            });
+        } catch (cargoErr) {
+            console.error('Error detaching cargo for voided consignment:', cargoErr);
         }
 
         const flags = validateConsignment(consignment);

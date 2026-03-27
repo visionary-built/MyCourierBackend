@@ -1,6 +1,8 @@
 const BookingStatus = require('../models/bookingStatus');
 const ManualBooking = require('../models/ManualBooking');
 const DeliverySheetPhaseI = require('../models/DeliverySheetPhaseI');
+const { getCargoContext } = require('../services/cargoLinkageService');
+const { getArrivalSummaryFromHistory } = require('../services/arrivalEventsService');
 
 // Normalize BookingStatus/ManualBooking into a single tracking payload shape
 const normalizeTracking = (booking, source) => {
@@ -52,17 +54,23 @@ exports.getTrackingById = async (req, res) => {
         });
       }
       booking = manual;
+      const base = normalizeTracking(booking, 'manual_booking');
+      const cargo = await getCargoContext(base.consignmentNumber);
+      const arrival = getArrivalSummaryFromHistory(base.statusHistory);
       return res.status(200).json({
         success: true,
         message: 'Tracking data retrieved successfully',
-        data: normalizeTracking(booking, 'manual_booking')
+        data: { ...base, cargo, arrival }
       });
     }
 
+    const base = normalizeTracking(booking, 'booking_status');
+    const cargo = await getCargoContext(base.consignmentNumber);
+    const arrival = getArrivalSummaryFromHistory(base.statusHistory);
     return res.status(200).json({ 
       success: true, 
       message: 'Tracking data retrieved successfully',
-      data: normalizeTracking(booking, 'booking_status')
+      data: { ...base, cargo, arrival }
     });
   } catch (error) {
     console.error('Error in getTrackingById:', error);
@@ -103,17 +111,23 @@ exports.getTrackingByConsignmentNumber = async (req, res) => {
         });
       }
 
+      const base = normalizeTracking(manual, 'manual_booking');
+      const cargo = await getCargoContext(base.consignmentNumber);
+      const arrival = getArrivalSummaryFromHistory(base.statusHistory);
       return res.status(200).json({
         success: true,
         message: 'Tracking data retrieved successfully',
-        data: normalizeTracking(manual, 'manual_booking')
+        data: { ...base, cargo, arrival }
       });
     }
 
+    const base = normalizeTracking(booking, 'booking_status');
+    const cargo = await getCargoContext(base.consignmentNumber);
+    const arrival = getArrivalSummaryFromHistory(base.statusHistory);
     return res.status(200).json({ 
       success: true, 
       message: 'Tracking data retrieved successfully',
-      data: normalizeTracking(booking, 'booking_status')
+      data: { ...base, cargo, arrival }
     });
   } catch (error) {
     console.error('Error in getTrackingByConsignmentNumber:', error);

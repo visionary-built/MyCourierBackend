@@ -27,6 +27,11 @@ const giftServiceController = require('../controllers/giftServiceController');
 const internationalServiceController = require('../controllers/internationalServiceController');
 const monitoringController = require('../controllers/monitoringController');
 const rateCardController = require('../controllers/rateCardController');
+const cargoController = require('../controllers/cargoController');
+const firstMailArrivalController = require('../controllers/firstMailArrivalController');
+const firstMailController = require('../controllers/firstMailController');
+const lastMailNotesController = require('../controllers/lastMailNotesController');
+const statusController = require('../controllers/statusController');
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -142,6 +147,7 @@ router.put('/return-sheet/:id/complete', returnSheetController.completeReturnShe
 
 // Manual Booking - Full CRUD Operations
 router.post("/manual-booking", manualBookingController.createBooking);
+router.post("/manual-booking/walk-in", manualBookingController.createWalkInBooking);
 router.get("/manual-booking", manualBookingController.getAllBookings);
 router.get("/manual-booking/stats", adminAuth, manualBookingController.getManualBookingStats);
 router.get("/manual-booking/search", manualBookingController.getBookingsWithFilters);
@@ -249,5 +255,36 @@ router.get('/rate-cards', rateCardController.getAllRateCards);
 router.post('/rate-cards', superAdminAuth, rateCardController.createRateCard);
 router.put('/rate-cards/:id', superAdminAuth, rateCardController.updateRateCard);
 router.delete('/rate-cards/:id', superAdminAuth, rateCardController.deleteRateCard);
+
+// Cargo Module
+router.post('/cargo/bags', cargoController.createBag);
+router.put('/cargo/bags/:id/in-transit', cargoController.markBagInTransit);
+router.get('/cargo/bags/history', cargoController.getBagHistory);
+router.post('/cargo/manifests', cargoController.createManifest);
+router.get('/cargo/manifests/pending-report', cargoController.getPendingManifestReport);
+router.get('/cargo/manifests/history', cargoController.getManifestHistory);
+
+// First Mail — origin / destination arrival (explicit endpoints)
+router.post('/first-mail/origin-arrival', firstMailArrivalController.recordOriginArrival);
+router.post('/first-mail/destination-arrival', firstMailArrivalController.recordDestinationArrival);
+router.get('/first-mail/pickup-history', firstMailController.getPickupHistory);
+
+// Last Mail — delivery note (scan CN), pending cash, return note (scan CN)
+router.post('/last-mail/delivery-notes', lastMailNotesController.createDeliveryNote);
+router.post('/last-mail/delivery-notes/:id/scan', lastMailNotesController.scanDeliveryNote);
+router.get('/last-mail/delivery-notes/:id', lastMailNotesController.getDeliveryNoteById);
+router.get('/last-mail/delivery-notes', lastMailNotesController.listDeliveryNotes);
+router.put('/last-mail/delivery-notes/:id/close', lastMailNotesController.closeDeliveryNote);
+router.get('/last-mail/pending-cash-collection', lastMailNotesController.getPendingCashCollection);
+router.post('/last-mail/pending-cash-collection/collect', lastMailNotesController.recordCashCollection);
+router.post('/last-mail/return-notes', lastMailNotesController.createReturnNote);
+router.post('/last-mail/return-notes/:id/scan', lastMailNotesController.scanReturnNote);
+router.get('/last-mail/return-notes/:id', lastMailNotesController.getReturnNoteById);
+router.get('/last-mail/return-notes', lastMailNotesController.listReturnNotes);
+router.put('/last-mail/return-notes/:id/close', lastMailNotesController.closeReturnNote);
+
+// Status — quick scan & scanning history
+router.get('/status/quick-scan/:consignmentNumber', statusController.quickScan);
+router.get('/status/scanning-history', statusController.getScanningHistory);
 
 module.exports = router;

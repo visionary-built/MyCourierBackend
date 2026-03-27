@@ -2,6 +2,7 @@ const Rider = require('../models/Rider');
 const ManualBooking = require('../models/ManualBooking');
 const BookingStatus = require('../models/bookingStatus');
 const DeliverySheetPhaseI = require('../models/DeliverySheetPhaseI');
+const { getCargoContext } = require('../services/cargoLinkageService');
 // Get all active riders for selection
 const getActiveRiders = async (req, res) => {
   try {
@@ -172,9 +173,13 @@ const addConsignmentNumber = async (req, res) => {
       console.error("Error updating booking status:", updateError);
     }
 
+    const cargo = await getCargoContext(consignmentNumber.toUpperCase());
     res.status(200).json({
       success: true,
-      data: deliverySheet,
+      data: {
+        ...(deliverySheet.toObject ? deliverySheet.toObject() : deliverySheet),
+        cargo
+      },
       message: 'New delivery sheet created with consignment number and booking status updated to in-transit'
     });
   } catch (error) {
