@@ -65,7 +65,16 @@ const bookingStatusSchema = new mongoose.Schema({
     status: {
         type: String,
         required: true,
-        enum: ['pending', 'in-transit', 'delivered', 'returned', 'cancelled'],
+        enum: [
+            'pending',
+            'pending-pickup',
+            'at-origin-facility',
+            'at-destination-facility',
+            'in-transit',
+            'delivered',
+            'returned',
+            'cancelled'
+        ],
         default: 'pending'
     },
     statusHistory: [
@@ -82,6 +91,10 @@ const bookingStatusSchema = new mongoose.Schema({
         default: Date.now
     },
     deliveryDate: {
+        type: Date
+    },
+    /** Set when COD is recorded as collected at office (Last Mail — pending cash). */
+    cashCollectedAt: {
         type: Date
     },
     remarks: {

@@ -264,8 +264,29 @@ exports.unifiedLogin = async (req, res) => {
         if (userAuth) {
             const passwordMatch = await bcrypt.compare(password, userAuth.password);
             if (!passwordMatch) {
-                console.log('Unified login UserAuth password mismatch for', loginId);
-                return res.status(401).json({ success: false, message: "Invalid credentials" });
+                // Bootstrap fallback: allow .env superadmin password for bootstrap email
+                // even if an older DB hash exists, then sync DB hash.
+                if (loginId === process.env.EMAIL) {
+                    const envPasswordMatch = await bcrypt.compare(password, process.env.ADMIN_PASSWORD || '');
+                    if (envPasswordMatch) {
+                        console.log('Unified login using bootstrap .env password for', loginId);
+                        try {
+                            userAuth.password = process.env.ADMIN_PASSWORD;
+                            userAuth.role = userAuth.role || 'superAdmin';
+                            userAuth.isAdmin = true;
+                            await userAuth.save();
+                            console.log('Synced UserAuth password hash from .env for', loginId);
+                        } catch (syncErr) {
+                            console.error('Failed to sync bootstrap password to UserAuth:', syncErr.message);
+                        }
+                    } else {
+                        console.log('Unified login UserAuth password mismatch for', loginId);
+                        return res.status(401).json({ success: false, message: "Invalid credentials" });
+                    }
+                } else {
+                    console.log('Unified login UserAuth password mismatch for', loginId);
+                    return res.status(401).json({ success: false, message: "Invalid credentials" });
+                }
             }
 
             const role = userAuth.role;
@@ -283,6 +304,62 @@ exports.unifiedLogin = async (req, res) => {
             return res.json({
                 success: true,
                 message: "Login successful",
+                token: adminToken,
+                role,
+                userType: 'admin',
+                user: {
+                    id: userAuth._id,
+                    email: userAuth.email,
+                    fullName: userAuth.fullName,
+                    username: userAuth.username,
+                    role
+                }
+            });
+        }
+
+        // 1b) No UserAuth in DB, but login matches bootstrap EMAIL from .env
+        //     Allow logging in with ADMIN_PASSWORD and auto-create/sync UserAuth.
+        if (!userAuth && loginId === process.env.EMAIL) {
+            const envPasswordMatch = await bcrypt.compare(password, process.env.ADMIN_PASSWORD || '');
+            if (!envPasswordMatch) {
+                console.log('Unified login .env bootstrap password mismatch for', loginId);
+                return res.status(401).json({ success: false, message: 'Invalid credentials' });
+            }
+
+            console.log('Unified login creating bootstrap superAdmin from .env for', loginId);
+            try {
+                const newSuperAdmin = new UserAuth({
+                    email: loginId,
+                    password: process.env.ADMIN_PASSWORD, // already hashed
+                    fullName: 'System Super Admin',
+                    username: 'superadmin',
+                    role: 'superAdmin',
+                    isAdmin: true
+                });
+                userAuth = await newSuperAdmin.save();
+            } catch (saveErr) {
+                console.error('Failed to create bootstrap superAdmin in unifiedLogin:', saveErr.message);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Internal server error'
+                });
+            }
+
+            const role = userAuth.role;
+            const adminToken = jwt.sign(
+                {
+                    email: userAuth.email,
+                    role,
+                    id: userAuth._id,
+                    timestamp: Date.now()
+                },
+                process.env.JWT_SECRET,
+                { expiresIn: '7d' }
+            );
+
+            return res.json({
+                success: true,
+                message: 'Login successful',
                 token: adminToken,
                 role,
                 userType: 'admin',

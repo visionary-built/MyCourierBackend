@@ -3,10 +3,13 @@ const ManualBooking = require('../models/ManualBooking');
 const DeliverySheetPhaseI = require('../models/DeliverySheetPhaseI');
 const Customer = require('../models/Customer');
 const mongoose = require('mongoose');
+const { getCargoContext } = require('../services/cargoLinkageService');
+const { getArrivalSummaryFromHistory } = require('../services/arrivalEventsService');
 
 // Detailed tracking stages accepted from UI
 const TRACKING_STAGES = [
     'Booking',
+    'Pending Pickup',
     'Received By Rider',
     'Arrived At Facility',
     'Bagging',
@@ -25,7 +28,16 @@ const TRACKING_STAGES = [
     'Return To Shipper'
 ];
 
-const BASIC_STATUSES = ['pending', 'in-transit', 'delivered', 'returned', 'cancelled'];
+const BASIC_STATUSES = [
+    'pending',
+    'pending-pickup',
+    'at-origin-facility',
+    'at-destination-facility',
+    'in-transit',
+    'delivered',
+    'returned',
+    'cancelled'
+];
 
 const normalizeStatusInput = (value = '') => String(value).trim().toLowerCase();
 
@@ -33,17 +45,18 @@ const normalizeStatusInput = (value = '') => String(value).trim().toLowerCase();
 const mapTrackingStageToDbStatus = (rawStatus) => {
     const normalized = normalizeStatusInput(rawStatus);
     if (normalized === 'delivered') return 'delivered';
+    if (normalized === 'pending pickup') return 'pending-pickup';
     if (
         normalized === 'return to shipper' ||
         normalized === 'return to origin' ||
         normalized === 'return to office'
     ) return 'returned';
+    if (normalized === 'arrived at facility') return 'at-origin-facility';
+    if (normalized === 'unload at destination') return 'at-destination-facility';
     if (
         normalized === 'in transit' ||
         normalized === 'received by rider' ||
-        normalized === 'arrived at facility' ||
         normalized === 'bagging' ||
-        normalized === 'unload at destination' ||
         normalized === 'sorting for rider' ||
         normalized === '1st attempt delivery' ||
         normalized === '2nd attempt out for delivery' ||
@@ -494,6 +507,7 @@ exports.getBookingByConsignmentNumber = async (req, res) => {
             booking = {
                 _id: manual._id,
                 consignmentNumber: manual.consignmentNo,
+                statusHistory: manual.statusHistory || [],
                 consigneeName: manual.consigneeName,
                 consigneeAddress: manual.consigneeAddress,
                 consigneeMobile: manual.consigneeMobile,
@@ -540,6 +554,11 @@ exports.getBookingByConsignmentNumber = async (req, res) => {
         } else {
             bookingObj.deliverySheet = null;
         }
+
+        const cargo = await getCargoContext(bookingObj.consignmentNumber);
+        bookingObj.cargo = cargo;
+        const hist = bookingObj.statusHistory || [];
+        bookingObj.arrival = getArrivalSummaryFromHistory(hist);
 
         res.status(200).json({
             success: true,
@@ -663,16 +682,25 @@ exports.updateBookingStatus = async (req, res) => {
             console.error("Error updating delivery sheet status:", deliverySheetError);
         }
 
-        res.status(200).json({
-            success: true,
-            message: 'Booking status updated successfully',
-            data: booking || {
+        const cnUpper = consignmentNumber.toUpperCase();
+        const cargo = await getCargoContext(cnUpper);
+        const payload = booking
+            ? booking.toObject()
+            : {
                 _id: manualUpdated._id,
                 consignmentNumber: manualUpdated.consignmentNo,
                 status: manualUpdated.status,
                 remarks: manualUpdated.remarks,
                 updatedAt: manualUpdated.updatedAt
-            }
+            };
+
+        const hist = booking ? booking.statusHistory : manualUpdated.statusHistory;
+        const arrival = getArrivalSummaryFromHistory(hist || []);
+
+        res.status(200).json({
+            success: true,
+            message: 'Booking status updated successfully',
+            data: { ...payload, cargo, arrival }
         });
 
     } catch (error) {

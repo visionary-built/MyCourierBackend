@@ -14,6 +14,13 @@ exports.createBooking = async (req, res) => {
   try {
     const {
       customerId: bodyCustomerId,
+      isWalkInCustomer,
+      walkInCustomerName,
+      walkInCustomerPhone,
+      walkInCustomerAddress,
+      senderName: bodySenderName,
+      senderAddress: bodySenderAddress,
+      senderPhone: bodySenderPhone,
       serviceType,
       originCity,
       destinationCity,
@@ -40,10 +47,15 @@ exports.createBooking = async (req, res) => {
     const createdBy = req.user && req.user.role === "customer" ? "customer" : "admin";
 
     let finalCustomerId;
+    const isPrivilegedPortalUser = !!(req.user && ["superAdmin", "admin", "operation", "operationPortal"].includes(req.user.role));
     
     // If customer or codClient is creating their own booking, use their ID
     if (req.user && (req.user.role === "customer" || req.user.role === "codClientPortal")) {
       finalCustomerId = req.user._id;
+    } else if (isWalkInCustomer && isPrivilegedPortalUser) {
+      // Walk-in bookings are created without a registered account.
+      // We keep a stable marker with timestamp for traceability.
+      finalCustomerId = `walk-in-${Date.now()}`;
     } else if (bodyCustomerId) {
       // If admin is creating booking for a customer
       finalCustomerId = bodyCustomerId;
@@ -64,15 +76,22 @@ exports.createBooking = async (req, res) => {
     // Sender details from customer profile when available.
     // We do NOT invent dummy values here; if profile fields are missing,
     // they remain undefined and the label/load-sheet API will apply its own defaults.
-    let senderName;
-    let senderAddress;
-    let senderPhone;
+    let senderName = bodySenderName;
+    let senderAddress = bodySenderAddress;
+    let senderPhone = bodySenderPhone;
 
     // For authenticated customer (customer portal), auth middleware sets req.customer
     if (req.customer) {
       senderName = req.customer.brandName || req.customer.contactPerson || req.customer.username;
       senderAddress = req.customer.address;
       senderPhone = req.customer.contactNo;
+    }
+
+    // Walk-in sender fallback from the provided walk-in customer fields.
+    if (isWalkInCustomer) {
+      senderName = senderName || walkInCustomerName;
+      senderAddress = senderAddress || walkInCustomerAddress;
+      senderPhone = senderPhone || walkInCustomerPhone;
     }
 
     if (!serviceType || !originCity || !destinationCity || !consigneeName || !consigneeMobile || !weight) {
@@ -245,7 +264,9 @@ exports.createBooking = async (req, res) => {
         senderPhone,
         status: "pending",
         bookingDate: newBooking.date || new Date(),
-        remarks: `Created via ${createdBy === "admin" ? "Admin" : "Customer"} portal`
+        remarks: isWalkInCustomer
+          ? `Created via Walk-In booking (${createdBy === "admin" ? "Admin" : "Customer"} portal)`
+          : `Created via ${createdBy === "admin" ? "Admin" : "Customer"} portal`
       });
 
       await bookingStatus.save();
@@ -267,6 +288,23 @@ exports.createBooking = async (req, res) => {
       error: error.message
     });
   }
+};
+
+// Create walk-in booking (SuperAdmin/Admin/Operation)
+exports.createWalkInBooking = async (req, res) => {
+  if (!req.user || !["superAdmin", "admin", "operation", "operationPortal"].includes(req.user.role)) {
+    return res.status(403).json({
+      success: false,
+      message: "Access denied"
+    });
+  }
+
+  req.body = {
+    ...req.body,
+    isWalkInCustomer: true
+  };
+
+  return exports.createBooking(req, res);
 };
 
 
@@ -878,14 +916,16 @@ exports.getManualBookingStats = async (req, res) => {
     let totalCodAmount = 0;
     let deliveredShipments = 0;
     let pendingShipments = 0;
+    let pendingPickupShipments = 0;
 
-    /** @type {Map<string, { bookingCount: number, totalCodAmount: number, deliveredCount: number, pendingCount: number }>} */
+    /** @type {Map<string, { bookingCount: number, totalCodAmount: number, deliveredCount: number, pendingCount: number, pendingPickupCount: number }>} */
     const byCustomer = new Map();
 
     bookings.forEach((b) => {
       totalCodAmount += b.codAmount || 0;
       if (b.status === "delivered") deliveredShipments += 1;
       if (b.status === "pending") pendingShipments += 1;
+      if (b.status === "pending-pickup") pendingPickupShipments += 1;
 
       const key = b.customerId != null && String(b.customerId).trim() !== ""
         ? String(b.customerId)
@@ -895,7 +935,8 @@ exports.getManualBookingStats = async (req, res) => {
           bookingCount: 0,
           totalCodAmount: 0,
           deliveredCount: 0,
-          pendingCount: 0
+          pendingCount: 0,
+          pendingPickupCount: 0
         });
       }
       const agg = byCustomer.get(key);
@@ -903,6 +944,7 @@ exports.getManualBookingStats = async (req, res) => {
       agg.totalCodAmount += b.codAmount || 0;
       if (b.status === "delivered") agg.deliveredCount += 1;
       if (b.status === "pending") agg.pendingCount += 1;
+      if (b.status === "pending-pickup") agg.pendingPickupCount += 1;
     });
 
     const validObjectIds = [...byCustomer.keys()].filter(
@@ -934,7 +976,8 @@ exports.getManualBookingStats = async (req, res) => {
           bookingCount: agg.bookingCount,
           totalCodAmount: agg.totalCodAmount,
           deliveredCount: agg.deliveredCount,
-          pendingCount: agg.pendingCount
+          pendingCount: agg.pendingCount,
+          pendingPickupCount: agg.pendingPickupCount
         };
       })
       .sort((a, b) => b.bookingCount - a.bookingCount);
@@ -951,6 +994,7 @@ exports.getManualBookingStats = async (req, res) => {
         totalCodAmount,
         deliveredShipments,
         pendingShipments,
+        pendingPickupShipments,
         totalUniqueCustomers,
         customerBookingDetails,
         dateRange: {

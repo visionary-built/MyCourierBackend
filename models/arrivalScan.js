@@ -17,7 +17,16 @@ const arivalScanSchema = new mongoose.Schema({
   status: {
     type: String,
     required: true,
-    enum: ['pending', 'in-transit', 'delivered', 'returned', 'cancelled'],
+    enum: [
+      'pending',
+      'pending-pickup',
+      'at-origin-facility',
+      'at-destination-facility',
+      'in-transit',
+      'delivered',
+      'returned',
+      'cancelled'
+    ],
     default: 'pending'
   },
   senderName: {

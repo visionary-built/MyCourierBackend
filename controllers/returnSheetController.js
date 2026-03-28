@@ -1,6 +1,7 @@
 const ReturnSheet = require('../models/ReturnSheet');
 const Rider = require('../models/Rider');
 const BookingStatus = require('../models/bookingStatus');
+const { detachConsignmentFromCargo } = require('../services/cargoLinkageService');
 
 // Create return Sheet
 const registerReturn = async (req, res) => {
@@ -40,6 +41,16 @@ const registerReturn = async (req, res) => {
     }
     booking.status = 'returned';
     await booking.save();
+
+    try {
+      await detachConsignmentFromCargo(cn, {
+        reason: 'return_registered',
+        source: 'return_sheet'
+      });
+    } catch (cargoErr) {
+      console.error('Error detaching cargo on return:', cargoErr);
+    }
+
     res.status(200).json({ success: true, data: returnSheet, message: 'Return registered successfully' });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error', error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error' });
