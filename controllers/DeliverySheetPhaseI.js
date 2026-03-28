@@ -3,6 +3,7 @@ const ManualBooking = require('../models/ManualBooking');
 const BookingStatus = require('../models/bookingStatus');
 const DeliverySheetPhaseI = require('../models/DeliverySheetPhaseI');
 const { getCargoContext } = require('../services/cargoLinkageService');
+const { assignConsignmentToRider } = require('../services/deliveryAssignmentService');
 // Get all active riders for selection
 const getActiveRiders = async (req, res) => {
   try {
@@ -68,112 +69,17 @@ const addConsignmentNumber = async (req, res) => {
   try {
     const { riderId, consignmentNumber } = req.body;
 
-    if (!riderId || !consignmentNumber) {
-      return res.status(400).json({
+    const result = await assignConsignmentToRider(riderId, consignmentNumber, {
+      allowSameRiderNoOp: false
+    });
+    if (!result.success) {
+      return res.status(result.statusCode).json({
         success: false,
-        message: 'Rider ID and consignment number are required'
+        message: result.message
       });
     }
 
-    const cnRegex = /^[A-Z0-9]+$/;
-    if (!cnRegex.test(consignmentNumber.toUpperCase())) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid consignment number format'
-      });
-    }
-
-    const rider = await Rider.findById(riderId);
-    if (!rider || !rider.active) {
-      return res.status(404).json({
-        success: false,
-        message: 'Rider not found or inactive'
-      });
-    }
-
-    // Search for consignment in both BookingStatus and ManualBooking models
-    let booking = await BookingStatus.findOne({ 
-      consignmentNumber: consignmentNumber.toUpperCase() 
-    });
-    
-    let manualBooking = null;
-    if (!booking) {
-      // If not found in BookingStatus, search in ManualBooking
-      manualBooking = await ManualBooking.findOne({ 
-        consignmentNo: consignmentNumber.toUpperCase() 
-      });
-      
-      if (!manualBooking) {
-        return res.status(404).json({
-          success: false,
-          message: 'Consignment number not found in booking system'
-        });
-      }
-    }
-
-    // Check if consignment exists in any ACTIVE delivery sheet
-    const existingActiveSheet = await DeliverySheetPhaseI.findOne({ 
-      consignmentNumbers: consignmentNumber.toUpperCase(),
-      status: 'active'
-    });
-    
-    if (existingActiveSheet) {
-      if (existingActiveSheet.riderId.toString() !== riderId) {
-        return res.status(400).json({
-          success: false,
-          message: 'Consignment number is already assigned to another active rider'
-        });
-      } else {
-        return res.status(400).json({
-          success: false,
-          message: 'Consignment number is already assigned to you in another delivery sheet'
-        });
-      }
-    }
-
-    // Clean up any empty active sheets for this rider to prevent duplicates
-    await DeliverySheetPhaseI.deleteMany({
-      riderId: rider._id,
-      status: 'active',
-      $or: [
-        { consignmentNumbers: { $size: 0 } },
-        { consignmentNumbers: { $exists: false } }
-      ]
-    });
-
-    // Create a new delivery sheet for this consignment
-    const deliverySheet = await DeliverySheetPhaseI.create({
-      riderId: rider._id,
-      riderName: rider.riderName,
-      riderCode: rider.riderCode,
-      consignmentNumbers: [consignmentNumber.toUpperCase()],
-      count: 1
-    });
-
-    try {
-      // Update BookingStatus if it exists
-      if (booking) {
-        await BookingStatus.findOneAndUpdate(
-          { consignmentNumber: consignmentNumber.toUpperCase() },
-          { 
-            status: 'in-transit',
-            remarks: `Assigned to rider: ${rider.riderName} (${rider.riderCode})`
-          }
-        );
-      }
-      
-      // Update ManualBooking if it exists
-      if (manualBooking) {
-        await ManualBooking.findOneAndUpdate(
-          { consignmentNo: consignmentNumber.toUpperCase() },
-          { status: 'in-transit' }
-        );
-      }
-    } catch (updateError) {
-      console.error("Error updating booking status:", updateError);
-    }
-
-    const cargo = await getCargoContext(consignmentNumber.toUpperCase());
+    const { deliverySheet, cargo } = result;
     res.status(200).json({
       success: true,
       data: {
@@ -545,7 +451,9 @@ const riderDeclineConsignment = async (req, res) => {
     if (booking) {
       const declineNote = `Declined by ${req.user.riderCode || req.user._id} at ${new Date().toISOString()}: ${reason}`;
       booking.remarks = booking.remarks ? `${booking.remarks} | ${declineNote}` : declineNote;
-      if (booking.status === 'in-transit') {
+      if (
+        ['in-transit', 'at-origin-facility', 'at-destination-facility'].includes(booking.status)
+      ) {
         booking.status = 'pending';
       }
       await booking.save();
@@ -554,7 +462,9 @@ const riderDeclineConsignment = async (req, res) => {
     if (manualBooking) {
       const declineNote = `Declined by ${req.user.riderCode || req.user._id} at ${new Date().toISOString()}: ${reason}`;
       manualBooking.remarks = manualBooking.remarks ? `${manualBooking.remarks} | ${declineNote}` : declineNote;
-      if (manualBooking.status === 'in-transit') {
+      if (
+        ['in-transit', 'at-origin-facility', 'at-destination-facility'].includes(manualBooking.status)
+      ) {
         manualBooking.status = 'pending';
       }
       await manualBooking.save();
@@ -646,6 +556,100 @@ const getDeliverySheetById = async (req, res) => {
   }
 };
 
+const DELIVERY_SHEET_STATUSES = ['active', 'pending', 'in-transit', 'delivered', 'cancelled', 'completed'];
+
+// Admin: update a delivery sheet by document id (e.g. edit modal)
+const updateDeliverySheetById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { riderName, riderCode, status, remarks } = req.body;
+
+    const deliverySheet = await DeliverySheetPhaseI.findById(id);
+    if (!deliverySheet) {
+      return res.status(404).json({
+        success: false,
+        message: 'Delivery sheet not found'
+      });
+    }
+
+    const previousStatus = deliverySheet.status;
+
+    if (riderName !== undefined) {
+      deliverySheet.riderName = String(riderName).trim();
+    }
+    if (riderCode !== undefined) {
+      deliverySheet.riderCode = String(riderCode).trim();
+    }
+    if (remarks !== undefined) {
+      deliverySheet.remarks = remarks == null ? '' : String(remarks).trim();
+    }
+    if (status !== undefined) {
+      const normalized = String(status).trim().toLowerCase();
+      if (!DELIVERY_SHEET_STATUSES.includes(normalized)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid status'
+        });
+      }
+      // ManualBooking / rider-complete flow use "delivered" only. "completed" on a sheet is the same
+      // closure state; store as "delivered" so one terminal value matches list + booking views.
+      const finalSheetStatus = normalized === 'completed' ? 'delivered' : normalized;
+      deliverySheet.status = finalSheetStatus;
+      if (finalSheetStatus === 'delivered') {
+        deliverySheet.completedAt = deliverySheet.completedAt || new Date();
+      }
+    }
+
+    await deliverySheet.save();
+
+    const finishedNow =
+      deliverySheet.status === 'delivered' &&
+      previousStatus !== 'delivered' &&
+      previousStatus !== 'completed';
+
+    if (finishedNow && deliverySheet.consignmentNumbers.length > 0) {
+      const remarkText = deliverySheet.remarks || 'Delivered - Delivery sheet updated by admin';
+      try {
+        await BookingStatus.updateMany(
+          { consignmentNumber: { $in: deliverySheet.consignmentNumbers } },
+          {
+            status: 'delivered',
+            deliveryDate: new Date(),
+            remarks: remarkText
+          }
+        );
+      } catch (statusError) {
+        console.error('Error updating booking statuses:', statusError);
+      }
+      try {
+        await ManualBooking.updateMany(
+          { consignmentNo: { $in: deliverySheet.consignmentNumbers } },
+          { status: 'delivered' }
+        );
+      } catch (manualBookingError) {
+        console.error('Error updating manual booking statuses:', manualBookingError);
+      }
+    }
+
+    const populated = await DeliverySheetPhaseI.findById(deliverySheet._id).populate(
+      'rider',
+      'riderName riderCode mobileNo'
+    );
+
+    res.status(200).json({
+      success: true,
+      data: populated,
+      message: 'Delivery sheet updated successfully'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+};
+
 module.exports = {
   getActiveRiders,
   createOrGetDeliverySheet,
@@ -657,5 +661,6 @@ module.exports = {
    riderAcceptConsignment,
    riderDeclineConsignment,
   getAllDeliverySheets,
-  getDeliverySheetById
+  getDeliverySheetById,
+  updateDeliverySheetById
 };

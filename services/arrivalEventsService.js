@@ -38,19 +38,25 @@ function getArrivalSummaryFromHistory(statusHistory = []) {
 /**
  * Record origin facility arrival — updates BookingStatus, ManualBooking (if present), and arrival-scan Parcel (if present).
  */
-async function recordOriginArrival(consignmentNumber, { remarks, updatedBy } = {}) {
-  return applyArrivalStage(normalizeCn(consignmentNumber), ORIGIN_STAGE, { remarks, updatedBy });
+async function recordOriginArrival(consignmentNumber, opts = {}) {
+  return applyArrivalStage(normalizeCn(consignmentNumber), ORIGIN_STAGE, opts);
 }
 
 /**
  * Record destination (hub) arrival — same linkage as origin.
  */
-async function recordDestinationArrival(consignmentNumber, { remarks, updatedBy } = {}) {
-  return applyArrivalStage(normalizeCn(consignmentNumber), DEST_STAGE, { remarks, updatedBy });
+async function recordDestinationArrival(consignmentNumber, opts = {}) {
+  return applyArrivalStage(normalizeCn(consignmentNumber), DEST_STAGE, opts);
 }
 
-async function applyArrivalStage(cn, stage, { remarks, updatedBy }) {
-  const dbStatus = "in-transit";
+function stageToBookingStatus(stage) {
+  if (stage === ORIGIN_STAGE) return "at-origin-facility";
+  if (stage === DEST_STAGE) return "at-destination-facility";
+  return "in-transit";
+}
+
+async function applyArrivalStage(cn, stage, { remarks, updatedBy, skipParcel = false } = {}) {
+  const dbStatus = stageToBookingStatus(stage);
   const historyEntry = {
     status: stage,
     timestamp: new Date(),
@@ -65,29 +71,39 @@ async function applyArrivalStage(cn, stage, { remarks, updatedBy }) {
     return { ok: false, code: "NOT_FOUND", message: "Consignment not found in booking system" };
   }
 
+  const bookingTerminal = (s) =>
+    ["delivered", "cancelled", "returned"].includes(String(s || "").toLowerCase());
+
   if (bs) {
-    bs.status = dbStatus;
-    if (!Array.isArray(bs.statusHistory)) bs.statusHistory = [];
-    bs.statusHistory.push(historyEntry);
-    if (remarks) bs.remarks = remarks;
-    await bs.save();
+    if (!bookingTerminal(bs.status)) {
+      bs.status = dbStatus;
+      if (!Array.isArray(bs.statusHistory)) bs.statusHistory = [];
+      bs.statusHistory.push(historyEntry);
+      if (remarks) bs.remarks = remarks;
+      await bs.save();
+    }
   }
 
   if (mb) {
-    mb.status = dbStatus;
-    if (!Array.isArray(mb.statusHistory)) mb.statusHistory = [];
-    mb.statusHistory.push(historyEntry);
-    if (remarks) mb.remarks = remarks;
-    await mb.save();
+    if (!bookingTerminal(mb.status)) {
+      mb.status = dbStatus;
+      if (!Array.isArray(mb.statusHistory)) mb.statusHistory = [];
+      mb.statusHistory.push(historyEntry);
+      if (remarks) mb.remarks = remarks;
+      await mb.save();
+    }
   }
 
-  let parcel = await Parcel.findOne({ consignmentNumber: cn });
-  if (parcel) {
-    const note = `${stage}${remarks ? ` — ${remarks}` : ""}`;
-    parcel.status = "in-transit";
-    parcel.arrivalDate = new Date();
-    parcel.remarks = parcel.remarks ? `${parcel.remarks} | ${note}` : note;
-    await parcel.save();
+  let parcel = null;
+  if (!skipParcel) {
+    parcel = await Parcel.findOne({ consignmentNumber: cn });
+    if (parcel) {
+      const note = `${stage}${remarks ? ` — ${remarks}` : ""}`;
+      parcel.status = dbStatus;
+      parcel.arrivalDate = new Date();
+      parcel.remarks = parcel.remarks ? `${parcel.remarks} | ${note}` : note;
+      await parcel.save();
+    }
   }
 
   const primary = bs || mb;

@@ -2,6 +2,8 @@ const LastMailDeliveryNote = require("../models/LastMailDeliveryNote");
 const LastMailReturnNote = require("../models/LastMailReturnNote");
 const BookingStatus = require("../models/bookingStatus");
 const ManualBooking = require("../models/ManualBooking");
+const Rider = require("../models/Rider");
+const { assignConsignmentToRider } = require("../services/deliveryAssignmentService");
 
 const ALLOWED_ROLES = ["superAdmin", "admin", "operation", "operationPortal"];
 
@@ -46,16 +48,26 @@ exports.createDeliveryNote = async (req, res) => {
     if (!assertRole(req)) {
       return res.status(403).json({ success: false, message: "Access denied" });
     }
-    const { remarks } = req.body;
-    const note = await LastMailDeliveryNote.create({
+    const { remarks, riderId } = req.body;
+    const payload = {
       remarks,
       status: "open",
       createdByRole: req.user.role,
       createdById: String(req.user.id || req.user._id || "")
-    });
+    };
+    if (riderId) {
+      const rider = await Rider.findById(riderId);
+      if (!rider || !rider.active) {
+        return res.status(404).json({ success: false, message: "Rider not found or inactive" });
+      }
+      payload.riderId = rider._id;
+    }
+    const note = await LastMailDeliveryNote.create(payload);
     return res.status(201).json({
       success: true,
-      message: "Delivery note created — scan consignments to add shipments",
+      message: payload.riderId
+        ? "Delivery note created — scans will assign each consignment to this rider (in-transit + delivery sheet)"
+        : "Delivery note created — provide riderId on create or on first scan to assign shipments to a rider",
       data: note
     });
   } catch (error) {
@@ -100,6 +112,39 @@ exports.scanDeliveryNote = async (req, res) => {
       });
     }
 
+    const riderIdRaw = note.riderId || req.body.riderId;
+    if (!riderIdRaw) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "riderId is required: send riderId when creating the delivery note, or include riderId on this scan"
+      });
+    }
+
+    const rider = await Rider.findById(riderIdRaw);
+    if (!rider || !rider.active) {
+      return res.status(404).json({ success: false, message: "Rider not found or inactive" });
+    }
+
+    if (!note.riderId) {
+      note.riderId = rider._id;
+    } else if (note.riderId.toString() !== rider._id.toString()) {
+      return res.status(400).json({
+        success: false,
+        message: "This note is locked to another rider; use the rider set when the note was created"
+      });
+    }
+
+    const assignResult = await assignConsignmentToRider(String(rider._id), cn, {
+      allowSameRiderNoOp: true
+    });
+    if (!assignResult.success) {
+      return res.status(assignResult.statusCode).json({
+        success: false,
+        message: assignResult.message
+      });
+    }
+
     note.entries.push({
       consignmentNumber: cn,
       scannedAt: new Date(),
@@ -116,8 +161,16 @@ exports.scanDeliveryNote = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Consignment scanned — shipment count updated",
-      data: note
+      message: assignResult.alreadyAssigned
+        ? "Consignment scanned — already assigned to this rider; note updated"
+        : "Consignment scanned — assigned to rider (in-transit) and note updated",
+      data: {
+        note,
+        assignment: {
+          deliverySheetId: assignResult.deliverySheet._id,
+          alreadyAssigned: !!assignResult.alreadyAssigned
+        }
+      }
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Server error", error: error.message });
@@ -189,6 +242,25 @@ exports.closeDeliveryNote = async (req, res) => {
       success: true,
       message: "Delivery note closed",
       data: note
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+exports.deleteDeliveryNote = async (req, res) => {
+  try {
+    if (!assertRole(req)) {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+    const note = await LastMailDeliveryNote.findByIdAndDelete(req.params.id);
+    if (!note) {
+      return res.status(404).json({ success: false, message: "Note not found" });
+    }
+    return res.status(200).json({
+      success: true,
+      message: "Delivery note deleted",
+      data: { id: note._id, noteNo: note.noteNo }
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Server error", error: error.message });

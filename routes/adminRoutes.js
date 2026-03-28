@@ -137,6 +137,7 @@ router.get('/delivery-sheet-phase-1/rider/:riderId', deliverySheetPhaseIControll
 router.get('/delivery-sheet-phase-1', deliverySheetPhaseIController.getAllDeliverySheets);
 router.get('/delivery-sheet-phase-1/:id', deliverySheetPhaseIController.getDeliverySheetById);
 router.put('/delivery-sheet-phase-1/rider/:riderId/complete', deliverySheetPhaseIController.completeDeliverySheet);
+router.put('/delivery-sheet-phase-1/:id', deliverySheetPhaseIController.updateDeliverySheetById);
 router.delete('/delivery-sheet-phase-1/remove-consignment', deliverySheetPhaseIController.removeConsignmentNumber);
 
 
@@ -275,6 +276,7 @@ router.post('/last-mail/delivery-notes/:id/scan', lastMailNotesController.scanDe
 router.get('/last-mail/delivery-notes/:id', lastMailNotesController.getDeliveryNoteById);
 router.get('/last-mail/delivery-notes', lastMailNotesController.listDeliveryNotes);
 router.put('/last-mail/delivery-notes/:id/close', lastMailNotesController.closeDeliveryNote);
+router.delete('/last-mail/delivery-notes/:id', lastMailNotesController.deleteDeliveryNote);
 router.get('/last-mail/pending-cash-collection', lastMailNotesController.getPendingCashCollection);
 router.post('/last-mail/pending-cash-collection/collect', lastMailNotesController.recordCashCollection);
 router.post('/last-mail/return-notes', lastMailNotesController.createReturnNote);

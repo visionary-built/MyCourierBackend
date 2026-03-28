@@ -9,6 +9,7 @@ const { getArrivalSummaryFromHistory } = require('../services/arrivalEventsServi
 // Detailed tracking stages accepted from UI
 const TRACKING_STAGES = [
     'Booking',
+    'Pending Pickup',
     'Received By Rider',
     'Arrived At Facility',
     'Bagging',
@@ -27,7 +28,16 @@ const TRACKING_STAGES = [
     'Return To Shipper'
 ];
 
-const BASIC_STATUSES = ['pending', 'in-transit', 'delivered', 'returned', 'cancelled'];
+const BASIC_STATUSES = [
+    'pending',
+    'pending-pickup',
+    'at-origin-facility',
+    'at-destination-facility',
+    'in-transit',
+    'delivered',
+    'returned',
+    'cancelled'
+];
 
 const normalizeStatusInput = (value = '') => String(value).trim().toLowerCase();
 
@@ -35,17 +45,18 @@ const normalizeStatusInput = (value = '') => String(value).trim().toLowerCase();
 const mapTrackingStageToDbStatus = (rawStatus) => {
     const normalized = normalizeStatusInput(rawStatus);
     if (normalized === 'delivered') return 'delivered';
+    if (normalized === 'pending pickup') return 'pending-pickup';
     if (
         normalized === 'return to shipper' ||
         normalized === 'return to origin' ||
         normalized === 'return to office'
     ) return 'returned';
+    if (normalized === 'arrived at facility') return 'at-origin-facility';
+    if (normalized === 'unload at destination') return 'at-destination-facility';
     if (
         normalized === 'in transit' ||
         normalized === 'received by rider' ||
-        normalized === 'arrived at facility' ||
         normalized === 'bagging' ||
-        normalized === 'unload at destination' ||
         normalized === 'sorting for rider' ||
         normalized === '1st attempt delivery' ||
         normalized === '2nd attempt out for delivery' ||

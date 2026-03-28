@@ -228,6 +228,9 @@ exports.getBranchPerformance = async (req, res) => {
       totalShipments: manualBookings.length,
       byStatus: {
         pending: 0,
+        'pending-pickup': 0,
+        'at-origin-facility': 0,
+        'at-destination-facility': 0,
         'in-transit': 0,
         delivered: 0,
         returned: 0,
@@ -436,6 +439,9 @@ exports.getBranchSummary = async (req, res) => {
       totalShipments: manualBookings.length,
       byStatus: {
         pending: 0,
+        'pending-pickup': 0,
+        'at-origin-facility': 0,
+        'at-destination-facility': 0,
         'in-transit': 0,
         delivered: 0,
         returned: 0,

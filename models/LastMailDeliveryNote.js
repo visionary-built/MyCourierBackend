@@ -18,6 +18,8 @@ const scanEntrySchema = new mongoose.Schema(
 const lastMailDeliveryNoteSchema = new mongoose.Schema(
   {
     noteNo: { type: String, unique: true, uppercase: true, trim: true },
+    /** When set, each scan assigns the consignment to this rider (delivery sheet + in-transit) without using Booking Status separately. */
+    riderId: { type: mongoose.Schema.Types.ObjectId, ref: "Rider" },
     entries: [scanEntrySchema],
     shipmentCount: { type: Number, default: 0 },
     status: { type: String, enum: ["open", "closed"], default: "open" },
@@ -30,6 +32,7 @@ const lastMailDeliveryNoteSchema = new mongoose.Schema(
 );
 
 lastMailDeliveryNoteSchema.index({ status: 1, createdAt: -1 });
+lastMailDeliveryNoteSchema.index({ riderId: 1 });
 lastMailDeliveryNoteSchema.index({ noteNo: 1 });
 
 lastMailDeliveryNoteSchema.pre("save", function preSave(next) {

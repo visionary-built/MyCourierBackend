@@ -2,7 +2,19 @@ const Rider = require('../models/Rider');
 const ParcelService = require('../services/parcelService');
 const ManualBooking = require('../models/ManualBooking');
 const { getCargoContext } = require('../services/cargoLinkageService');
-const { getArrivalMetaForConsignment } = require('../services/arrivalEventsService');
+const {
+  getArrivalMetaForConsignment,
+  recordOriginArrival,
+  recordDestinationArrival
+} = require('../services/arrivalEventsService');
+
+/** When these roles set parcel to in-transit (origin arrival scan), mirror BookingStatus / ManualBooking — same as POST /first-mail/origin-arrival. Riders use a different role and are excluded. */
+const PARCEL_IN_TRANSIT_SYNC_BOOKING_ROLES = [
+  'superAdmin',
+  'admin',
+  'operation',
+  'operationPortal'
+];
 
 exports.searchParcels = async (req, res) => {
   try {
@@ -183,7 +195,16 @@ exports.updateParcelStatus = async (req, res) => {
       });
     }
 
-    const validStatuses = ['pending', 'in-transit', 'delivered', 'returned', 'cancelled'];
+    const validStatuses = [
+      'pending',
+      'pending-pickup',
+      'at-origin-facility',
+      'at-destination-facility',
+      'in-transit',
+      'delivered',
+      'returned',
+      'cancelled'
+    ];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
@@ -208,6 +229,23 @@ exports.updateParcelStatus = async (req, res) => {
         success: false,
         message: `Parcel with consignment number ${consignmentNumber} not found`
       });
+    }
+
+    const role = req.user && req.user.role;
+    if (role && PARCEL_IN_TRANSIT_SYNC_BOOKING_ROLES.includes(role)) {
+      if (status === 'in-transit' || status === 'at-origin-facility') {
+        await recordOriginArrival(consignmentNumber, {
+          remarks,
+          updatedBy: role,
+          skipParcel: true
+        });
+      } else if (status === 'at-destination-facility') {
+        await recordDestinationArrival(consignmentNumber, {
+          remarks,
+          updatedBy: role,
+          skipParcel: true
+        });
+      }
     }
 
     const cargo = await getCargoContext(consignmentNumber);

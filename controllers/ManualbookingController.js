@@ -916,14 +916,16 @@ exports.getManualBookingStats = async (req, res) => {
     let totalCodAmount = 0;
     let deliveredShipments = 0;
     let pendingShipments = 0;
+    let pendingPickupShipments = 0;
 
-    /** @type {Map<string, { bookingCount: number, totalCodAmount: number, deliveredCount: number, pendingCount: number }>} */
+    /** @type {Map<string, { bookingCount: number, totalCodAmount: number, deliveredCount: number, pendingCount: number, pendingPickupCount: number }>} */
     const byCustomer = new Map();
 
     bookings.forEach((b) => {
       totalCodAmount += b.codAmount || 0;
       if (b.status === "delivered") deliveredShipments += 1;
       if (b.status === "pending") pendingShipments += 1;
+      if (b.status === "pending-pickup") pendingPickupShipments += 1;
 
       const key = b.customerId != null && String(b.customerId).trim() !== ""
         ? String(b.customerId)
@@ -933,7 +935,8 @@ exports.getManualBookingStats = async (req, res) => {
           bookingCount: 0,
           totalCodAmount: 0,
           deliveredCount: 0,
-          pendingCount: 0
+          pendingCount: 0,
+          pendingPickupCount: 0
         });
       }
       const agg = byCustomer.get(key);
@@ -941,6 +944,7 @@ exports.getManualBookingStats = async (req, res) => {
       agg.totalCodAmount += b.codAmount || 0;
       if (b.status === "delivered") agg.deliveredCount += 1;
       if (b.status === "pending") agg.pendingCount += 1;
+      if (b.status === "pending-pickup") agg.pendingPickupCount += 1;
     });
 
     const validObjectIds = [...byCustomer.keys()].filter(
@@ -972,7 +976,8 @@ exports.getManualBookingStats = async (req, res) => {
           bookingCount: agg.bookingCount,
           totalCodAmount: agg.totalCodAmount,
           deliveredCount: agg.deliveredCount,
-          pendingCount: agg.pendingCount
+          pendingCount: agg.pendingCount,
+          pendingPickupCount: agg.pendingPickupCount
         };
       })
       .sort((a, b) => b.bookingCount - a.bookingCount);
@@ -989,6 +994,7 @@ exports.getManualBookingStats = async (req, res) => {
         totalCodAmount,
         deliveredShipments,
         pendingShipments,
+        pendingPickupShipments,
         totalUniqueCustomers,
         customerBookingDetails,
         dateRange: {
