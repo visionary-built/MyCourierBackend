@@ -6,6 +6,7 @@ const LastMailReturnNote = require("../models/LastMailReturnNote");
 const BookingStatus = require("../models/bookingStatus");
 const ManualBooking = require("../models/ManualBooking");
 const Rider = require("../models/Rider");
+const DeliverySheetPhaseI = require("../models/DeliverySheetPhaseI");
 const { assignConsignmentToRider } = require("../services/deliveryAssignmentService");
 
 const codSlipDir = path.join(__dirname, "..", "uploads", "cod-slips");
@@ -130,6 +131,107 @@ async function loadBookingMapForCns(cns) {
   return map;
 }
 
+/**
+ * CNs for create-in-one-step: `consignmentNumbers` (array), or string split by comma/space/semicolon,
+ * plus optional `scanBar` (same splitting). Order preserved; duplicates removed.
+ */
+function parseInitialConsignmentNumbers(body) {
+  if (!body) return [];
+  const list = [];
+  const raw = body.consignmentNumbers;
+  if (Array.isArray(raw)) {
+    for (const x of raw) {
+      const n = normalizeCn(x);
+      if (n) list.push(n);
+    }
+  } else if (typeof raw === "string" && raw.trim()) {
+    for (const part of raw.split(/[\s,;]+/)) {
+      const n = normalizeCn(part);
+      if (n) list.push(n);
+    }
+  }
+  if (body.scanBar != null && String(body.scanBar).trim()) {
+    for (const part of String(body.scanBar).split(/[\s,;]+/)) {
+      const n = normalizeCn(part);
+      if (n) list.push(n);
+    }
+  }
+  return [...new Set(list)];
+}
+
+/**
+ * One scan onto an open note document (same rules as POST .../scan). Mutates and saves `note` on success.
+ */
+async function scanConsignmentOntoNoteDocument(note, cn, req) {
+  if (!note || note.status !== "open") {
+    return { success: false, statusCode: 404, message: "Note not found or already closed" };
+  }
+  const normalized = normalizeCn(cn);
+  if (!normalized) {
+    return { success: false, statusCode: 400, message: "consignmentNumber is required" };
+  }
+  if (note.entries.some((e) => e.consignmentNumber === normalized)) {
+    return {
+      success: false,
+      statusCode: 400,
+      message: "This consignment is already scanned on this note",
+      meta: { noteNo: note.noteNo, shipmentCount: note.shipmentCount }
+    };
+  }
+
+  const resolved = await resolveConsignment(normalized);
+  if (!resolved) {
+    return { success: false, statusCode: 400, message: "Consignment not found in booking system" };
+  }
+
+  const riderIdRaw = note.riderId || req.body.riderId;
+  if (!riderIdRaw) {
+    return {
+      success: false,
+      statusCode: 400,
+      message:
+        "riderId is required: send riderId when creating the delivery note, or include riderId on this scan"
+    };
+  }
+
+  const rider = await Rider.findById(riderIdRaw);
+  if (!rider || !rider.active) {
+    return { success: false, statusCode: 404, message: "Rider not found or inactive" };
+  }
+
+  if (!note.riderId) {
+    note.riderId = rider._id;
+  } else if (note.riderId.toString() !== rider._id.toString()) {
+    return {
+      success: false,
+      statusCode: 400,
+      message: "This note is locked to another rider; use the rider set when the note was created"
+    };
+  }
+
+  const assignResult = await assignConsignmentToRider(String(rider._id), normalized, {
+    allowSameRiderNoOp: true
+  });
+  if (!assignResult.success) {
+    return { success: false, statusCode: assignResult.statusCode, message: assignResult.message };
+  }
+
+  note.entries.push({
+    consignmentNumber: normalized,
+    scannedAt: new Date(),
+    scannedByRole: req.user.role,
+    scannedById: String(req.user.id || req.user._id || ""),
+    consigneeName: resolved.consigneeName,
+    destinationCity: resolved.destinationCity,
+    codAmount: resolved.codAmount,
+    weight: resolved.weight,
+    source: resolved.source
+  });
+  note.shipmentCount = note.entries.length;
+  await note.save();
+  return { success: true, assignResult };
+}
+
 // ─── A) Delivery note (create + scan) ───────────────────────────────────────
 
 exports.createDeliveryNote = async (req, res) => {
@@ -138,6 +240,14 @@ exports.createDeliveryNote = async (req, res) => {
       return res.status(403).json({ success: false, message: "Access denied" });
     }
     const { remarks, riderId } = req.body;
+    const initialCns = parseInitialConsignmentNumbers(req.body);
+    if (initialCns.length > 0 && !riderId) {
+      return res.status(400).json({
+        success: false,
+        message: "riderId is required when adding consignment numbers on create"
+      });
+    }
+
     const payload = {
       remarks,
       status: "open",
@@ -152,11 +262,33 @@ exports.createDeliveryNote = async (req, res) => {
       payload.riderId = rider._id;
     }
     const note = await LastMailDeliveryNote.create(payload);
+
+    for (const cn of initialCns) {
+      const result = await scanConsignmentOntoNoteDocument(note, cn, req);
+      if (!result.success) {
+        return res.status(result.statusCode).json({
+          success: false,
+          message: result.message,
+          failedConsignment: cn,
+          data: { note, ...(result.meta || {}) }
+        });
+      }
+    }
+
+    let message;
+    if (initialCns.length > 0) {
+      message = `Delivery note created with ${initialCns.length} consignment(s) — assigned to rider (in-transit + delivery sheet)`;
+    } else if (payload.riderId) {
+      message =
+        "Delivery note created — scans will assign each consignment to this rider (in-transit + delivery sheet)";
+    } else {
+      message =
+        "Delivery note created — provide riderId on create or on first scan to assign shipments to a rider";
+    }
+
     return res.status(201).json({
       success: true,
-      message: payload.riderId
-        ? "Delivery note created — scans will assign each consignment to this rider (in-transit + delivery sheet)"
-        : "Delivery note created — provide riderId on create or on first scan to assign shipments to a rider",
+      message,
       data: note
     });
   } catch (error) {
@@ -176,78 +308,14 @@ exports.scanDeliveryNote = async (req, res) => {
     }
 
     const note = await LastMailDeliveryNote.findById(id);
-    if (!note || note.status !== "open") {
-      return res.status(404).json({
-        success: false,
-        message: "Note not found or already closed"
-      });
+    const result = await scanConsignmentOntoNoteDocument(note, consignmentNumber, req);
+    if (!result.success) {
+      const err = { success: false, message: result.message };
+      if (result.meta) err.data = result.meta;
+      return res.status(result.statusCode).json(err);
     }
 
-    const cn = normalizeCn(consignmentNumber);
-    const existsOnNote = note.entries.some((e) => e.consignmentNumber === cn);
-    if (existsOnNote) {
-      return res.status(400).json({
-        success: false,
-        message: "This consignment is already scanned on this note",
-        data: { noteNo: note.noteNo, shipmentCount: note.shipmentCount }
-      });
-    }
-
-    const resolved = await resolveConsignment(cn);
-    if (!resolved) {
-      return res.status(400).json({
-        success: false,
-        message: "Consignment not found in booking system"
-      });
-    }
-
-    const riderIdRaw = note.riderId || req.body.riderId;
-    if (!riderIdRaw) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "riderId is required: send riderId when creating the delivery note, or include riderId on this scan"
-      });
-    }
-
-    const rider = await Rider.findById(riderIdRaw);
-    if (!rider || !rider.active) {
-      return res.status(404).json({ success: false, message: "Rider not found or inactive" });
-    }
-
-    if (!note.riderId) {
-      note.riderId = rider._id;
-    } else if (note.riderId.toString() !== rider._id.toString()) {
-      return res.status(400).json({
-        success: false,
-        message: "This note is locked to another rider; use the rider set when the note was created"
-      });
-    }
-
-    const assignResult = await assignConsignmentToRider(String(rider._id), cn, {
-      allowSameRiderNoOp: true
-    });
-    if (!assignResult.success) {
-      return res.status(assignResult.statusCode).json({
-        success: false,
-        message: assignResult.message
-      });
-    }
-
-    note.entries.push({
-      consignmentNumber: cn,
-      scannedAt: new Date(),
-      scannedByRole: req.user.role,
-      scannedById: String(req.user.id || req.user._id || ""),
-      consigneeName: resolved.consigneeName,
-      destinationCity: resolved.destinationCity,
-      codAmount: resolved.codAmount,
-      weight: resolved.weight,
-      source: resolved.source
-    });
-    note.shipmentCount = note.entries.length;
-    await note.save();
-
+    const { assignResult } = result;
     return res.status(200).json({
       success: true,
       message: assignResult.alreadyAssigned
@@ -260,6 +328,87 @@ exports.scanDeliveryNote = async (req, res) => {
           alreadyAssigned: !!assignResult.alreadyAssigned
         }
       }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+/**
+ * Remove one scanned CN from an open delivery note and mirror delivery-sheet + booking cleanup
+ * (Last Mail creates one active sheet per CN for the rider).
+ */
+exports.removeDeliveryNoteEntry = async (req, res) => {
+  try {
+    if (!assertRole(req)) {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+
+    const { id } = req.params;
+    const rawCn = req.params.consignmentNumber != null ? String(req.params.consignmentNumber) : "";
+    const cn = normalizeCn(decodeURIComponent(rawCn));
+    if (!cn) {
+      return res.status(400).json({ success: false, message: "consignmentNumber is required" });
+    }
+
+    const note = await LastMailDeliveryNote.findById(id);
+    if (!note) {
+      return res.status(404).json({ success: false, message: "Note not found" });
+    }
+    if (note.status !== "open") {
+      return res.status(400).json({ success: false, message: "Only open notes can remove consignments" });
+    }
+
+    const idx = note.entries.findIndex((e) => e.consignmentNumber === cn);
+    if (idx === -1) {
+      return res.status(404).json({ success: false, message: "Consignment not found on this note" });
+    }
+
+    note.entries.splice(idx, 1);
+    note.shipmentCount = note.entries.length;
+    await note.save();
+
+    if (note.riderId) {
+      const sheet = await DeliverySheetPhaseI.findOne({
+        riderId: note.riderId,
+        status: "active",
+        consignmentNumbers: cn
+      });
+      if (sheet) {
+        const remaining = (sheet.consignmentNumbers || []).filter((x) => normalizeCn(x) !== cn);
+        if (remaining.length === 0) {
+          await DeliverySheetPhaseI.deleteOne({ _id: sheet._id });
+        } else {
+          sheet.consignmentNumbers = remaining;
+          await sheet.save();
+        }
+      }
+
+      try {
+        await BookingStatus.findOneAndUpdate(
+          { consignmentNumber: cn },
+          {
+            status: "pending",
+            remarks: "Removed from delivery note — back to pending"
+          }
+        );
+      } catch (_e) {
+        /* ignore */
+      }
+      try {
+        await ManualBooking.findOneAndUpdate(
+          { consignmentNo: cn },
+          { status: "pending" }
+        );
+      } catch (_e) {
+        /* ignore */
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Consignment removed from note",
+      data: note
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Server error", error: error.message });
@@ -536,6 +685,36 @@ exports.getReceiveNoteDetail = async (req, res) => {
         stats,
         entries: entryDetails
       }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+exports.updateReceiveNote = async (req, res) => {
+  try {
+    if (!assertRole(req)) {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+
+    const { id } = req.params;
+    const { remarks } = req.body;
+
+    const note = await LastMailDeliveryNote.findById(id);
+    if (!note) {
+      return res.status(404).json({ success: false, message: "Note not found" });
+    }
+
+    if (remarks !== undefined) {
+      note.remarks = String(remarks || "").trim();
+    }
+
+    await note.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Receive note updated",
+      data: note
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Server error", error: error.message });

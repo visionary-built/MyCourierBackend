@@ -8,6 +8,12 @@ const cargoManifestSchema = new mongoose.Schema(
       uppercase: true,
       trim: true
     },
+    /** Barcode / scan value for labels and scanners; defaults to manifestNo if omitted on create. */
+    scanBar: {
+      type: String,
+      trim: true,
+      uppercase: true
+    },
     bagIds: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -63,6 +69,7 @@ const cargoManifestSchema = new mongoose.Schema(
 );
 
 cargoManifestSchema.index({ manifestNo: 1 });
+cargoManifestSchema.index({ scanBar: 1 }, { unique: true, sparse: true });
 cargoManifestSchema.index({ status: 1 });
 cargoManifestSchema.index({ createdAt: -1 });
 
@@ -72,6 +79,8 @@ cargoManifestSchema.pre("save", function saveHook(next) {
     const random = Math.floor(100 + Math.random() * 900);
     this.manifestNo = `MAN${stamp}${random}`;
   }
+  const rawBar = this.scanBar != null ? String(this.scanBar).trim() : "";
+  this.scanBar = rawBar ? rawBar.toUpperCase() : this.manifestNo;
   next();
 });
 

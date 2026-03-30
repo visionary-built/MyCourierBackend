@@ -275,6 +275,10 @@ router.get('/first-mail/pickup-history', firstMailController.getPickupHistory);
 // Last Mail — delivery note (scan CN), pending cash, return note (scan CN)
 router.post('/last-mail/delivery-notes', lastMailNotesController.createDeliveryNote);
 router.post('/last-mail/delivery-notes/:id/scan', lastMailNotesController.scanDeliveryNote);
+router.delete(
+  '/last-mail/delivery-notes/:id/entries/:consignmentNumber',
+  lastMailNotesController.removeDeliveryNoteEntry
+);
 router.put('/last-mail/delivery-notes/:id', lastMailNotesController.updateDeliveryNote);
 router.get('/last-mail/delivery-notes/:id', lastMailNotesController.getDeliveryNoteById);
 router.get('/last-mail/delivery-notes', lastMailNotesController.listDeliveryNotes);
@@ -283,6 +287,13 @@ router.put('/last-mail/delivery-notes/:id/close', lastMailNotesController.closeD
 router.delete('/last-mail/delivery-notes/:id', lastMailNotesController.deleteDeliveryNote);
 router.get('/last-mail/receive-notes', lastMailNotesController.listReceiveNotes);
 router.get('/last-mail/receive-notes/:id', lastMailNotesController.getReceiveNoteDetail);
+router.put('/last-mail/receive-notes/:id', lastMailNotesController.updateReceiveNote);
+/** Same as POST /last-mail/delivery-notes/:id/scan — receive view uses delivery notes under the hood. */
+router.post('/last-mail/receive-notes/:id/scan', lastMailNotesController.scanDeliveryNote);
+router.delete(
+  '/last-mail/receive-notes/:id/entries/:consignmentNumber',
+  lastMailNotesController.removeDeliveryNoteEntry
+);
 router.get('/last-mail/pending-cash-collection', lastMailNotesController.getPendingCashCollection);
 router.post(
   '/last-mail/pending-cash-collection/collect',

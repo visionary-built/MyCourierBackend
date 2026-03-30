@@ -15,7 +15,7 @@ const isAuthorized = (req) => req.user && ALLOWED_ROLES.includes(req.user.role);
 
 exports.createBag = async (req, res) => {
   try {
-    if (!isAuthorized(req)) {
+    if (!isAuthorized(req)) {promt
       return res.status(403).json({ success: false, message: "Access denied" });
     }
 
@@ -243,7 +243,7 @@ exports.createManifest = async (req, res) => {
       return res.status(403).json({ success: false, message: "Access denied" });
     }
 
-    const { bagIds = [], originCity, destinationCity, remarks } = req.body;
+    const { bagIds = [], originCity, destinationCity, remarks, scanBar } = req.body;
 
     if (!originCity || !destinationCity || !Array.isArray(bagIds) || bagIds.length === 0) {
       return res.status(400).json({
@@ -270,6 +270,7 @@ exports.createManifest = async (req, res) => {
       originCity,
       destinationCity,
       remarks,
+      scanBar,
       status: "pending",
       createdByRole: req.user.role,
       createdById: String(req.user.id || req.user._id || "")
