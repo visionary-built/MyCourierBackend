@@ -97,6 +97,11 @@ const bookingStatusSchema = new mongoose.Schema({
     cashCollectedAt: {
         type: Date
     },
+    /** Bank deposit slip image path/URL (set when COD collection is completed with slip upload). */
+    codBankSlipUrl: {
+        type: String,
+        trim: true
+    },
     remarks: {
         type: String,
         trim: true

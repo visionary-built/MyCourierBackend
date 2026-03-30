@@ -55,7 +55,11 @@ function stageToBookingStatus(stage) {
   return "in-transit";
 }
 
-async function applyArrivalStage(cn, stage, { remarks, updatedBy, skipParcel = false } = {}) {
+async function applyArrivalStage(
+  cn,
+  stage,
+  { remarks, updatedBy, skipParcel = false, weight, pieces } = {}
+) {
   const dbStatus = stageToBookingStatus(stage);
   const historyEntry = {
     status: stage,
@@ -80,6 +84,12 @@ async function applyArrivalStage(cn, stage, { remarks, updatedBy, skipParcel = f
       if (!Array.isArray(bs.statusHistory)) bs.statusHistory = [];
       bs.statusHistory.push(historyEntry);
       if (remarks) bs.remarks = remarks;
+      if (typeof weight === "number" && !Number.isNaN(weight) && weight > 0) {
+        bs.weight = weight;
+      }
+      if (typeof pieces === "number" && !Number.isNaN(pieces) && pieces > 0) {
+        bs.pieces = pieces;
+      }
       await bs.save();
     }
   }
@@ -90,6 +100,12 @@ async function applyArrivalStage(cn, stage, { remarks, updatedBy, skipParcel = f
       if (!Array.isArray(mb.statusHistory)) mb.statusHistory = [];
       mb.statusHistory.push(historyEntry);
       if (remarks) mb.remarks = remarks;
+      if (typeof weight === "number" && !Number.isNaN(weight) && weight > 0) {
+        mb.weight = weight;
+      }
+      if (typeof pieces === "number" && !Number.isNaN(pieces) && pieces > 0) {
+        mb.pieces = pieces;
+      }
       await mb.save();
     }
   }
@@ -102,6 +118,9 @@ async function applyArrivalStage(cn, stage, { remarks, updatedBy, skipParcel = f
       parcel.status = dbStatus;
       parcel.arrivalDate = new Date();
       parcel.remarks = parcel.remarks ? `${parcel.remarks} | ${note}` : note;
+      if (typeof weight === "number" && !Number.isNaN(weight) && weight > 0) {
+        parcel.weight = weight;
+      }
       await parcel.save();
     }
   }

@@ -15,7 +15,7 @@ const isAuthorized = (req) => req.user && ALLOWED_ROLES.includes(req.user.role);
 
 exports.createBag = async (req, res) => {
   try {
-    if (!isAuthorized(req)) {
+    if (!isAuthorized(req)) {promt
       return res.status(403).json({ success: false, message: "Access denied" });
     }
 
@@ -133,6 +133,76 @@ exports.markBagInTransit = async (req, res) => {
   }
 };
 
+exports.receiveBag = async (req, res) => {
+  try {
+    if (!isAuthorized(req)) {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+
+    const { id } = req.params;
+    const { remarks } = req.body;
+    const bag = await CargoBag.findById(id);
+    if (!bag) {
+      return res.status(404).json({ success: false, message: "Bag not found" });
+    }
+
+    if (bag.status === "cancelled") {
+      return res.status(400).json({ success: false, message: "Cancelled bag cannot be received" });
+    }
+    if (bag.status === "completed") {
+      return res.status(400).json({ success: false, message: "Bag is already received" });
+    }
+
+    bag.status = "completed";
+    bag.completedAt = new Date();
+    if (remarks) bag.remarks = remarks;
+    await bag.save();
+
+    await BookingStatus.updateMany(
+      { consignmentNumber: { $in: bag.consignmentNumbers } },
+      {
+        $set: { status: "completed" },
+        $push: {
+          statusHistory: {
+            status: "completed",
+            timestamp: new Date(),
+            remarks: `Received via Bag ${bag.bagNo}`,
+            updatedBy: req.user.role
+          }
+        }
+      }
+    );
+
+    await ManualBooking.updateMany(
+      { consignmentNo: { $in: bag.consignmentNumbers } },
+      {
+        $set: { status: "completed" },
+        $push: {
+          statusHistory: {
+            status: "completed",
+            timestamp: new Date(),
+            remarks: `Received via Bag ${bag.bagNo}`,
+            updatedBy: req.user.role
+          }
+        }
+      }
+    );
+
+    await appendCargoNoteToBookings(bag.consignmentNumbers, {
+      remarks: `Cargo: bag ${bag.bagNo} received at destination`,
+      updatedBy: req.user.role
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Bag received successfully",
+      data: bag
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
 exports.getBagHistory = async (req, res) => {
   try {
     if (!isAuthorized(req)) {
@@ -173,7 +243,7 @@ exports.createManifest = async (req, res) => {
       return res.status(403).json({ success: false, message: "Access denied" });
     }
 
-    const { bagIds = [], originCity, destinationCity, remarks } = req.body;
+    const { bagIds = [], originCity, destinationCity, remarks, scanBar } = req.body;
 
     if (!originCity || !destinationCity || !Array.isArray(bagIds) || bagIds.length === 0) {
       return res.status(400).json({
@@ -200,6 +270,7 @@ exports.createManifest = async (req, res) => {
       originCity,
       destinationCity,
       remarks,
+      scanBar,
       status: "pending",
       createdByRole: req.user.role,
       createdById: String(req.user.id || req.user._id || "")
@@ -213,6 +284,83 @@ exports.createManifest = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: "Manifest created successfully",
+      data: manifest
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+exports.receiveManifest = async (req, res) => {
+  try {
+    if (!isAuthorized(req)) {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+
+    const { id } = req.params;
+    const { remarks } = req.body;
+    const manifest = await CargoManifest.findById(id);
+    if (!manifest) {
+      return res.status(404).json({ success: false, message: "Manifest not found" });
+    }
+
+    if (manifest.status === "cancelled") {
+      return res.status(400).json({ success: false, message: "Cancelled manifest cannot be received" });
+    }
+    if (manifest.status === "completed") {
+      return res.status(400).json({ success: false, message: "Manifest is already received" });
+    }
+
+    manifest.status = "completed";
+    manifest.completedAt = new Date();
+    if (remarks) manifest.remarks = remarks;
+    await manifest.save();
+
+    if (Array.isArray(manifest.bagIds) && manifest.bagIds.length > 0) {
+      await CargoBag.updateMany(
+        { _id: { $in: manifest.bagIds }, status: { $nin: ["cancelled", "completed"] } },
+        { $set: { status: "completed", completedAt: new Date() } }
+      );
+    }
+
+    await BookingStatus.updateMany(
+      { consignmentNumber: { $in: manifest.consignmentNumbers } },
+      {
+        $set: { status: "completed" },
+        $push: {
+          statusHistory: {
+            status: "completed",
+            timestamp: new Date(),
+            remarks: `Received via Manifest ${manifest.manifestNo}`,
+            updatedBy: req.user.role
+          }
+        }
+      }
+    );
+
+    await ManualBooking.updateMany(
+      { consignmentNo: { $in: manifest.consignmentNumbers } },
+      {
+        $set: { status: "completed" },
+        $push: {
+          statusHistory: {
+            status: "completed",
+            timestamp: new Date(),
+            remarks: `Received via Manifest ${manifest.manifestNo}`,
+            updatedBy: req.user.role
+          }
+        }
+      }
+    );
+
+    await appendCargoNoteToBookings(manifest.consignmentNumbers, {
+      remarks: `Cargo: manifest ${manifest.manifestNo} received at destination`,
+      updatedBy: req.user.role
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Manifest received successfully",
       data: manifest
     });
   } catch (error) {

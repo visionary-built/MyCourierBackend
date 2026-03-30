@@ -19,7 +19,7 @@ async function getCargoContext(consignmentNumber) {
       .select("bagNo status originCity destinationCity createdAt inTransitAt remarks")
       .lean(),
     CargoManifest.findOne({ consignmentNumbers: cn })
-      .select("manifestNo status originCity destinationCity createdAt remarks")
+      .select("manifestNo scanBar status originCity destinationCity createdAt remarks")
       .lean()
   ]);
 
@@ -38,6 +38,7 @@ async function getCargoContext(consignmentNumber) {
     manifest: manifest
       ? {
           manifestNo: manifest.manifestNo,
+          scanBar: manifest.scanBar || manifest.manifestNo,
           status: manifest.status,
           originCity: manifest.originCity,
           destinationCity: manifest.destinationCity,

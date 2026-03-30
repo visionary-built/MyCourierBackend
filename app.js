@@ -1,4 +1,5 @@
 require('dotenv').config();
+const path = require('path');
 const express = require("express");
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -37,6 +38,9 @@ app.use(cors({
 // JSON parsing middleware
 app.use(express.json({ limit: '50mb' })); 
 app.use(express.urlencoded({ limit: '50mb', extended: true })); 
+
+// Uploaded files (COD bank slips, etc.)
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.get("/", (req, res) => {
     return res.json({ 
