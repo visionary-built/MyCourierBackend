@@ -169,8 +169,10 @@ router.get('/invoice', invoiceController.getAllInvoices);
 // Cargo Module
 router.post('/cargo/bags', cargoController.createBag);
 router.put('/cargo/bags/:id/in-transit', cargoController.markBagInTransit);
+router.put('/cargo/bags/:id/receive', cargoController.receiveBag);
 router.get('/cargo/bags/history', cargoController.getBagHistory);
 router.post('/cargo/manifests', cargoController.createManifest);
+router.put('/cargo/manifests/:id/receive', cargoController.receiveManifest);
 router.get('/cargo/manifests/pending-report', cargoController.getPendingManifestReport);
 router.get('/cargo/manifests/history', cargoController.getManifestHistory);
 
@@ -182,12 +184,21 @@ router.get('/first-mail/pickup-history', firstMailController.getPickupHistory);
 // Last Mail — delivery note, pending cash, return note
 router.post('/last-mail/delivery-notes', lastMailNotesController.createDeliveryNote);
 router.post('/last-mail/delivery-notes/:id/scan', lastMailNotesController.scanDeliveryNote);
+router.put('/last-mail/delivery-notes/:id', lastMailNotesController.updateDeliveryNote);
 router.get('/last-mail/delivery-notes/:id', lastMailNotesController.getDeliveryNoteById);
 router.get('/last-mail/delivery-notes', lastMailNotesController.listDeliveryNotes);
+router.put('/last-mail/delivery-notes/:id/submit', lastMailNotesController.submitDeliveryNote);
 router.put('/last-mail/delivery-notes/:id/close', lastMailNotesController.closeDeliveryNote);
 router.delete('/last-mail/delivery-notes/:id', lastMailNotesController.deleteDeliveryNote);
+router.get('/last-mail/receive-notes', lastMailNotesController.listReceiveNotes);
+router.get('/last-mail/receive-notes/:id', lastMailNotesController.getReceiveNoteDetail);
 router.get('/last-mail/pending-cash-collection', lastMailNotesController.getPendingCashCollection);
-router.post('/last-mail/pending-cash-collection/collect', lastMailNotesController.recordCashCollection);
+router.post(
+  '/last-mail/pending-cash-collection/collect',
+  lastMailNotesController.uploadCodBankSlip,
+  lastMailNotesController.recordCashCollection
+);
+router.get('/last-mail/cash-collection/complete', lastMailNotesController.listCompletedCashCollection);
 router.post('/last-mail/return-notes', lastMailNotesController.createReturnNote);
 router.post('/last-mail/return-notes/:id/scan', lastMailNotesController.scanReturnNote);
 router.get('/last-mail/return-notes/:id', lastMailNotesController.getReturnNoteById);

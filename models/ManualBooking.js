@@ -82,6 +82,8 @@ const ManualBookingSchema = new mongoose.Schema({
   ],
   /** Set when COD is recorded as collected at office (Last Mail — pending cash). */
   cashCollectedAt: { type: Date },
+  /** Bank deposit slip image path/URL (set when COD collection is completed with slip upload). */
+  codBankSlipUrl: { type: String, trim: true },
 }, { timestamps: true });
 
 ManualBookingSchema.pre("save", function (next) {

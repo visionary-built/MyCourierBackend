@@ -1,9 +1,35 @@
+const path = require("path");
+const fs = require("fs");
+const multer = require("multer");
 const LastMailDeliveryNote = require("../models/LastMailDeliveryNote");
 const LastMailReturnNote = require("../models/LastMailReturnNote");
 const BookingStatus = require("../models/bookingStatus");
 const ManualBooking = require("../models/ManualBooking");
 const Rider = require("../models/Rider");
 const { assignConsignmentToRider } = require("../services/deliveryAssignmentService");
+
+const codSlipDir = path.join(__dirname, "..", "uploads", "cod-slips");
+if (!fs.existsSync(codSlipDir)) {
+  fs.mkdirSync(codSlipDir, { recursive: true });
+}
+const codSlipStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, codSlipDir),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname) || ".jpg";
+    cb(null, `cod-${Date.now()}-${Math.floor(Math.random() * 10000)}${ext}`);
+  }
+});
+const codSlipUpload = multer({
+  storage: codSlipStorage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ok = /\.(jpe?g|png|webp|gif|pdf)$/i.test(file.originalname);
+    if (ok) cb(null, true);
+    else cb(new Error("Only image or PDF files allowed for bank slip"));
+  }
+});
+/** Multer middleware — field name `bankSlip` (required to complete COD collection). */
+exports.uploadCodBankSlip = codSlipUpload.single("bankSlip");
 
 const ALLOWED_ROLES = ["superAdmin", "admin", "operation", "operationPortal"];
 
@@ -39,6 +65,69 @@ async function resolveConsignment(cn) {
     };
   }
   return null;
+}
+
+async function getBookingRowForCn(cn) {
+  const upper = normalizeCn(cn);
+  const bs = await BookingStatus.findOne({ consignmentNumber: upper })
+    .select(
+      "consignmentNumber codAmount status consigneeName consigneeMobile destinationCity originCity bookingDate deliveryDate cashCollectedAt codBankSlipUrl weight pieces"
+    )
+    .lean();
+  if (bs) {
+    return { source: "booking_status", row: bs, consignmentNumber: upper };
+  }
+  const mb = await ManualBooking.findOne({ consignmentNo: upper })
+    .select(
+      "consignmentNo codAmount status consigneeName consigneeMobile destinationCity originCity date createdAt updatedAt cashCollectedAt codBankSlipUrl weight pieces"
+    )
+    .lean();
+  if (mb) {
+    return {
+      source: "manual_booking",
+      row: mb,
+      consignmentNumber: upper
+    };
+  }
+  return { source: null, row: null, consignmentNumber: upper };
+}
+
+function computeNoteStatsFromEntries(entries, bookingByCn) {
+  let deliveredCount = 0;
+  let deliveredCodAmount = 0;
+  let totalCodSnapshot = 0;
+  for (const e of entries) {
+    totalCodSnapshot += Number(e.codAmount) || 0;
+    const b = bookingByCn.get(normalizeCn(e.consignmentNumber));
+    const st = b?.status;
+    if (st === "delivered") {
+      deliveredCount += 1;
+      deliveredCodAmount += Number(b.codAmount != null ? b.codAmount : e.codAmount) || 0;
+    }
+  }
+  const totalParcels = entries.length;
+  return {
+    totalParcels,
+    deliveredCount,
+    notDeliveredCount: Math.max(0, totalParcels - deliveredCount),
+    totalCodSnapshot,
+    deliveredCodAmount
+  };
+}
+
+async function loadBookingMapForCns(cns) {
+  const uniq = [...new Set((cns || []).map((c) => normalizeCn(c)))].filter(Boolean);
+  const map = new Map();
+  if (uniq.length === 0) return map;
+  const [bsList, mbList] = await Promise.all([
+    BookingStatus.find({ consignmentNumber: { $in: uniq } })
+      .select("consignmentNumber status codAmount")
+      .lean(),
+    ManualBooking.find({ consignmentNo: { $in: uniq } }).select("consignmentNo status codAmount").lean()
+  ]);
+  bsList.forEach((b) => map.set(b.consignmentNumber, b));
+  mbList.forEach((m) => map.set(m.consignmentNo, m));
+  return map;
 }
 
 // ─── A) Delivery note (create + scan) ───────────────────────────────────────
@@ -192,6 +281,56 @@ exports.getDeliveryNoteById = async (req, res) => {
   }
 };
 
+exports.updateDeliveryNote = async (req, res) => {
+  try {
+    if (!assertRole(req)) {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+
+    const { id } = req.params;
+    const { remarks, riderId } = req.body;
+    const note = await LastMailDeliveryNote.findById(id);
+    if (!note) {
+      return res.status(404).json({ success: false, message: "Note not found" });
+    }
+    if (note.status === "closed") {
+      return res.status(400).json({ success: false, message: "Closed note cannot be updated" });
+    }
+
+    if (remarks !== undefined) {
+      note.remarks = String(remarks || "").trim();
+    }
+
+    if (riderId !== undefined) {
+      if (!riderId) {
+        note.riderId = undefined;
+      } else {
+        const rider = await Rider.findById(riderId);
+        if (!rider || !rider.active) {
+          return res.status(404).json({ success: false, message: "Rider not found or inactive" });
+        }
+
+        if (note.entries.length > 0 && note.riderId && note.riderId.toString() !== rider._id.toString()) {
+          return res.status(400).json({
+            success: false,
+            message: "Rider cannot be changed after scans exist on this note"
+          });
+        }
+        note.riderId = rider._id;
+      }
+    }
+
+    await note.save();
+    return res.status(200).json({
+      success: true,
+      message: "Delivery note updated",
+      data: note
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
 exports.listDeliveryNotes = async (req, res) => {
   try {
     if (!assertRole(req)) {
@@ -224,6 +363,42 @@ exports.listDeliveryNotes = async (req, res) => {
   }
 };
 
+/**
+ * Submit delivery note after scanning (open → submitted). No more scans; use Close later to archive.
+ */
+exports.submitDeliveryNote = async (req, res) => {
+  try {
+    if (!assertRole(req)) {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+    const { remarks } = req.body;
+    const note = await LastMailDeliveryNote.findById(req.params.id);
+    if (!note) {
+      return res.status(404).json({ success: false, message: "Note not found" });
+    }
+    if (note.status !== "open") {
+      return res.status(400).json({
+        success: false,
+        message: "Only open notes can be submitted"
+      });
+    }
+    note.status = "submitted";
+    note.submittedAt = new Date();
+    if (remarks) note.remarks = note.remarks ? `${note.remarks} | ${remarks}` : remarks;
+    await note.save();
+    return res.status(200).json({
+      success: true,
+      message: "Delivery note submitted",
+      data: note
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+/**
+ * Final archive: submitted → closed. (Optional legacy: open → closed in one step.)
+ */
 exports.closeDeliveryNote = async (req, res) => {
   try {
     if (!assertRole(req)) {
@@ -233,6 +408,15 @@ exports.closeDeliveryNote = async (req, res) => {
     const note = await LastMailDeliveryNote.findById(req.params.id);
     if (!note) {
       return res.status(404).json({ success: false, message: "Note not found" });
+    }
+    if (note.status === "closed") {
+      return res.status(400).json({ success: false, message: "Note is already closed" });
+    }
+    if (note.status === "open") {
+      return res.status(400).json({
+        success: false,
+        message: "Submit the delivery note first (use Submit), then you can close it from the list"
+      });
     }
     note.status = "closed";
     note.closedAt = new Date();
@@ -267,6 +451,97 @@ exports.deleteDeliveryNote = async (req, res) => {
   }
 };
 
+// ─── B2) Receive note — closed delivery notes with rider + booking stats ─────
+
+exports.listReceiveNotes = async (req, res) => {
+  try {
+    if (!assertRole(req)) {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+    const { page = 1, limit = 20 } = req.query;
+    const pageNo = Math.max(1, parseInt(page, 10) || 1);
+    const size = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+    const skip = (pageNo - 1) * size;
+
+    const { status } = req.query;
+    const query = {};
+    if (status) query.status = status;
+    const [notes, total] = await Promise.all([
+      LastMailDeliveryNote.find(query)
+        .populate("riderId", "riderName riderCode mobileNo active")
+        .sort({ updatedAt: -1 })
+        .skip(skip)
+        .limit(size)
+        .lean(),
+      LastMailDeliveryNote.countDocuments(query)
+    ]);
+
+    const data = await Promise.all(
+      notes.map(async (note) => {
+        const cns = (note.entries || []).map((e) => e.consignmentNumber);
+        const bookingByCn = await loadBookingMapForCns(cns);
+        const stats = computeNoteStatsFromEntries(note.entries || [], bookingByCn);
+        return { ...note, stats };
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Delivery notes for receive view (optional ?status=open|closed)",
+      data,
+      pagination: {
+        page: pageNo,
+        limit: size,
+        total,
+        totalPages: Math.ceil(total / size) || 1
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+exports.getReceiveNoteDetail = async (req, res) => {
+  try {
+    if (!assertRole(req)) {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+    const note = await LastMailDeliveryNote.findById(req.params.id)
+      .populate("riderId", "riderName riderCode mobileNo active address cnicNo")
+      .lean();
+    if (!note) {
+      return res.status(404).json({ success: false, message: "Note not found" });
+    }
+
+    const entryDetails = await Promise.all(
+      (note.entries || []).map(async (e) => {
+        const { source, row } = await getBookingRowForCn(e.consignmentNumber);
+        return {
+          scan: e,
+          consignmentNumber: normalizeCn(e.consignmentNumber),
+          currentBooking: row,
+          source
+        };
+      })
+    );
+
+    const bookingByCn = await loadBookingMapForCns((note.entries || []).map((x) => x.consignmentNumber));
+    const stats = computeNoteStatsFromEntries(note.entries || [], bookingByCn);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        note,
+        rider: note.riderId || null,
+        stats,
+        entries: entryDetails
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
 // ─── C) Pending cash collection ─────────────────────────────────────────────
 
 exports.getPendingCashCollection = async (req, res) => {
@@ -283,9 +558,10 @@ exports.getPendingCashCollection = async (req, res) => {
       $or: [{ cashCollectedAt: { $exists: false } }, { cashCollectedAt: null }]
     };
 
+    /** Delivered shipments with COD still held pending bank deposit (slip upload completes collection). */
     const baseQuery = {
       codAmount: { $gt: 0 },
-      status: { $nin: ["delivered", "cancelled"] },
+      status: "delivered",
       ...pendingCodClause
     };
     const destFilter = destinationCity
@@ -295,20 +571,20 @@ exports.getPendingCashCollection = async (req, res) => {
     const [bsRows, mbRows] = await Promise.all([
       BookingStatus.find(destFilter)
         .select(
-          "consignmentNumber codAmount status consigneeName consigneeMobile destinationCity originCity bookingDate updatedAt cashCollectedAt"
+          "consignmentNumber codAmount status consigneeName consigneeMobile destinationCity originCity bookingDate updatedAt cashCollectedAt codBankSlipUrl"
         )
         .sort({ updatedAt: -1 })
         .lean(),
       ManualBooking.find({
         codAmount: { $gt: 0 },
-        status: { $nin: ["delivered", "cancelled"] },
+        status: "delivered",
         ...pendingCodClause,
         ...(destinationCity
           ? { destinationCity: new RegExp(destinationCity.trim(), "i") }
           : {})
       })
         .select(
-          "consignmentNo codAmount status consigneeName consigneeMobile destinationCity originCity date updatedAt createdAt cashCollectedAt"
+          "consignmentNo codAmount status consigneeName consigneeMobile destinationCity originCity date updatedAt createdAt cashCollectedAt codBankSlipUrl"
         )
         .sort({ updatedAt: -1 })
         .lean()
@@ -325,6 +601,7 @@ exports.getPendingCashCollection = async (req, res) => {
         originCity: b.originCity,
         bookingDate: b.bookingDate,
         updatedAt: b.updatedAt,
+        codBankSlipUrl: b.codBankSlipUrl,
         source: "booking_status"
       })),
       ...mbRows.map((m) => ({
@@ -337,6 +614,7 @@ exports.getPendingCashCollection = async (req, res) => {
         originCity: m.originCity,
         bookingDate: m.date || m.createdAt,
         updatedAt: m.updatedAt,
+        codBankSlipUrl: m.codBankSlipUrl,
         source: "manual_booking"
       }))
     ];
@@ -350,7 +628,8 @@ exports.getPendingCashCollection = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Pending cash (COD) collection — consignments with COD not yet delivered/cancelled",
+      message:
+        "Pending cash (COD) — delivered shipments with COD not yet deposited to bank (upload bank slip via collect to complete)",
       data: {
         rows: paginated,
         summary: {
@@ -371,13 +650,22 @@ exports.getPendingCashCollection = async (req, res) => {
 };
 
 /**
- * Record COD collected at office — sets cashCollectedAt and removes row from pending list.
- * Body: { consignmentNumber, source: "booking_status" | "manual_booking", remarks? }
+ * Complete COD collection after bank deposit — multipart/form-data:
+ *   bankSlip (file, required), consignmentNumber, source: booking_status | manual_booking, remarks?
+ * Sets cashCollectedAt, codBankSlipUrl, removes row from pending cash list.
  */
 exports.recordCashCollection = async (req, res) => {
   try {
     if (!assertRole(req)) {
       return res.status(403).json({ success: false, message: "Access denied" });
+    }
+
+    if (!req.file || !req.file.filename) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "bankSlip file is required — send multipart/form-data with field name bankSlip (image or PDF)"
+      });
     }
 
     const { consignmentNumber, source, remarks } = req.body;
@@ -390,10 +678,13 @@ exports.recordCashCollection = async (req, res) => {
 
     const cn = normalizeCn(consignmentNumber);
     const now = new Date();
+    const slipUrl = `/uploads/cod-slips/${req.file.filename}`;
     const historyEntry = {
       status: "COD Collected",
       timestamp: now,
-      remarks: remarks || "Cash recorded at office (Last Mail)",
+      remarks:
+        remarks ||
+        `Bank deposit recorded — slip uploaded (${slipUrl}) (Last Mail)`,
       updatedBy: req.user.role
     };
 
@@ -405,16 +696,23 @@ exports.recordCashCollection = async (req, res) => {
       if (!doc.codAmount || doc.codAmount <= 0) {
         return res.status(400).json({ success: false, message: "No COD amount on this consignment" });
       }
+      if (doc.status !== "delivered") {
+        return res.status(400).json({
+          success: false,
+          message: "COD collection can only be completed for delivered consignments"
+        });
+      }
       if (doc.cashCollectedAt) {
         return res.status(400).json({ success: false, message: "COD already recorded as collected" });
       }
       doc.cashCollectedAt = now;
+      doc.codBankSlipUrl = slipUrl;
       if (!Array.isArray(doc.statusHistory)) doc.statusHistory = [];
       doc.statusHistory.push(historyEntry);
       await doc.save();
       return res.status(200).json({
         success: true,
-        message: "Cash collection recorded",
+        message: "Cash collection completed — bank slip saved",
         data: doc
       });
     }
@@ -427,16 +725,23 @@ exports.recordCashCollection = async (req, res) => {
       if (!doc.codAmount || doc.codAmount <= 0) {
         return res.status(400).json({ success: false, message: "No COD amount on this consignment" });
       }
+      if (doc.status !== "delivered") {
+        return res.status(400).json({
+          success: false,
+          message: "COD collection can only be completed for delivered consignments"
+        });
+      }
       if (doc.cashCollectedAt) {
         return res.status(400).json({ success: false, message: "COD already recorded as collected" });
       }
       doc.cashCollectedAt = now;
+      doc.codBankSlipUrl = slipUrl;
       if (!Array.isArray(doc.statusHistory)) doc.statusHistory = [];
       doc.statusHistory.push(historyEntry);
       await doc.save();
       return res.status(200).json({
         success: true,
-        message: "Cash collection recorded",
+        message: "Cash collection completed — bank slip saved",
         data: doc
       });
     }
@@ -444,6 +749,103 @@ exports.recordCashCollection = async (req, res) => {
     return res.status(400).json({
       success: false,
       message: 'source must be "booking_status" or "manual_booking"'
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+/**
+ * Completed COD collections (bank slip uploaded + cashCollectedAt set) — for "Complete" page.
+ */
+exports.listCompletedCashCollection = async (req, res) => {
+  try {
+    if (!assertRole(req)) {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+
+    const { page = 1, limit = 20, destinationCity } = req.query;
+    const pageNo = Math.max(1, parseInt(page, 10) || 1);
+    const size = Math.min(200, Math.max(1, parseInt(limit, 10) || 20));
+    const skip = (pageNo - 1) * size;
+
+    const destRx = destinationCity ? new RegExp(destinationCity.trim(), "i") : null;
+
+    const [bsRows, mbRows] = await Promise.all([
+      BookingStatus.find({
+        codAmount: { $gt: 0 },
+        cashCollectedAt: { $ne: null },
+        ...(destRx ? { destinationCity: destRx } : {})
+      })
+        .select(
+          "consignmentNumber codAmount status consigneeName consigneeMobile destinationCity originCity bookingDate cashCollectedAt codBankSlipUrl updatedAt"
+        )
+        .sort({ cashCollectedAt: -1 })
+        .lean(),
+      ManualBooking.find({
+        codAmount: { $gt: 0 },
+        cashCollectedAt: { $ne: null },
+        ...(destRx ? { destinationCity: destRx } : {})
+      })
+        .select(
+          "consignmentNo codAmount status consigneeName consigneeMobile destinationCity originCity date cashCollectedAt codBankSlipUrl updatedAt"
+        )
+        .sort({ cashCollectedAt: -1 })
+        .lean()
+    ]);
+
+    const rows = [
+      ...bsRows.map((b) => ({
+        consignmentNumber: b.consignmentNumber,
+        codAmount: b.codAmount,
+        status: b.status,
+        consigneeName: b.consigneeName,
+        consigneeMobile: b.consigneeMobile,
+        destinationCity: b.destinationCity,
+        originCity: b.originCity,
+        bookingDate: b.bookingDate,
+        updatedAt: b.updatedAt,
+        cashCollectedAt: b.cashCollectedAt,
+        codBankSlipUrl: b.codBankSlipUrl,
+        source: "booking_status"
+      })),
+      ...mbRows.map((m) => ({
+        consignmentNumber: m.consignmentNo,
+        codAmount: m.codAmount,
+        status: m.status,
+        consigneeName: m.consigneeName,
+        consigneeMobile: m.consigneeMobile,
+        destinationCity: m.destinationCity,
+        originCity: m.originCity,
+        bookingDate: m.date || m.createdAt,
+        updatedAt: m.updatedAt,
+        cashCollectedAt: m.cashCollectedAt,
+        codBankSlipUrl: m.codBankSlipUrl,
+        source: "manual_booking"
+      }))
+    ];
+
+    rows.sort((a, b) => new Date(b.cashCollectedAt) - new Date(a.cashCollectedAt));
+    const total = rows.length;
+    const paginated = rows.slice(skip, skip + size);
+    const totalCodCompleted = rows.reduce((sum, r) => sum + (Number(r.codAmount) || 0), 0);
+
+    return res.status(200).json({
+      success: true,
+      message: "Completed COD cash collections (bank deposit recorded)",
+      data: {
+        rows: paginated,
+        summary: {
+          totalRecords: total,
+          totalCodAmountCompleted: totalCodCompleted
+        }
+      },
+      pagination: {
+        page: pageNo,
+        limit: size,
+        total,
+        totalPages: Math.ceil(total / size) || 1
+      }
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Server error", error: error.message });

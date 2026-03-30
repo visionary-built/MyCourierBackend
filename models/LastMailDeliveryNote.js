@@ -22,8 +22,14 @@ const lastMailDeliveryNoteSchema = new mongoose.Schema(
     riderId: { type: mongoose.Schema.Types.ObjectId, ref: "Rider" },
     entries: [scanEntrySchema],
     shipmentCount: { type: Number, default: 0 },
-    status: { type: String, enum: ["open", "closed"], default: "open" },
+    status: {
+      type: String,
+      enum: ["open", "submitted", "closed"],
+      default: "open"
+    },
     remarks: { type: String, trim: true },
+    /** Set when user submits the note (handoff from scanning — not final archive). */
+    submittedAt: { type: Date },
     closedAt: { type: Date },
     createdByRole: { type: String, trim: true },
     createdById: { type: String, trim: true }
