@@ -69,10 +69,71 @@ const RECEIVE_TO_TRACKING_STAGE = {
   "out of city": "Return To Office",
   "allow to open as per shipper": "In Transit"
 };
+const BOOKING_TRACKING_STAGES = [
+  "Booking",
+  "Pending Pickup",
+  "Received By Rider",
+  "Arrived At Facility",
+  "Bagging",
+  "In Transit",
+  "Unload At Destination",
+  "Sorting For Rider",
+  "1st Attempt Delivery",
+  "Delivered",
+  "Not At Home",
+  "Cash Not Available",
+  "Not Responding",
+  "SMS Send",
+  "2nd Attempt Out For Delivery",
+  "Return To Office",
+  "Return To Origin",
+  "Return To Shipper"
+];
+const BOOKING_BASIC_STATUSES = [
+  "pending",
+  "pending-pickup",
+  "at-origin-facility",
+  "at-destination-facility",
+  "in-transit",
+  "delivered",
+  "returned",
+  "cancelled"
+];
 
 const assertRole = (req) => req.user && ALLOWED_ROLES.includes(req.user.role);
 
 const normalizeCn = (cn) => String(cn || "").trim().toUpperCase();
+const normalizeStatusInput = (value = "") => String(value).trim().toLowerCase();
+
+function mapTrackingStageToDbStatus(rawStatus) {
+  const normalized = normalizeStatusInput(rawStatus);
+  if (normalized === "delivered") return "delivered";
+  if (normalized === "pending pickup") return "pending-pickup";
+  if (
+    normalized === "return to shipper" ||
+    normalized === "return to origin" ||
+    normalized === "return to office"
+  )
+    return "returned";
+  if (normalized === "arrived at facility") return "at-origin-facility";
+  if (normalized === "unload at destination") return "at-destination-facility";
+  if (
+    normalized === "in transit" ||
+    normalized === "received by rider" ||
+    normalized === "bagging" ||
+    normalized === "sorting for rider" ||
+    normalized === "1st attempt delivery" ||
+    normalized === "2nd attempt out for delivery" ||
+    normalized === "not at home" ||
+    normalized === "cash not available" ||
+    normalized === "not responding" ||
+    normalized === "sms send"
+  )
+    return "in-transit";
+  if (normalized === "booking" || normalized === "pending") return "pending";
+  if (normalized === "cancelled" || normalized === "canceled") return "cancelled";
+  return null;
+}
 
 /**
  * Resolve consignment snapshot from BookingStatus or ManualBooking.
@@ -738,6 +799,13 @@ exports.updateReceiveNote = async (req, res) => {
       note.remarks = String(remarks || "").trim();
     }
     if (receiveStatus !== undefined) {
+      if (String(note.noteNo || "").toUpperCase().startsWith("DN")) {
+        return res.status(400).json({
+          success: false,
+          message: "Status update is disabled for DN receive notes"
+        });
+      }
+
       // Lock receive-status after closure: once marked "close", no further status edits.
       if (note.receiveStatus === "close") {
         const nextNormalized = String(receiveStatus || "")
@@ -804,6 +872,101 @@ exports.updateReceiveNote = async (req, res) => {
       success: true,
       message: "Receive note updated",
       data: note
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+/**
+ * Update one consignment status from DN receive-note detail screen.
+ */
+exports.updateReceiveNoteConsignmentStatus = async (req, res) => {
+  try {
+    if (!assertRole(req)) {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+
+    const { id, consignmentNumber } = req.params;
+    const { status } = req.body;
+    if (!status) {
+      return res.status(400).json({ success: false, message: "status is required" });
+    }
+
+    const note = await LastMailDeliveryNote.findById(id);
+    if (!note) return res.status(404).json({ success: false, message: "Note not found" });
+    if (!String(note.noteNo || "").toUpperCase().startsWith("DN")) {
+      return res.status(400).json({ success: false, message: "Only DN notes can update CN status here" });
+    }
+
+    const cn = normalizeCn(decodeURIComponent(consignmentNumber || ""));
+    const existsOnNote = (note.entries || []).some((e) => normalizeCn(e.consignmentNumber) === cn);
+    if (!existsOnNote) {
+      return res.status(404).json({ success: false, message: "Consignment not found on this note" });
+    }
+
+    const normalizedInput = normalizeStatusInput(status);
+    const matchedDetailedStage = BOOKING_TRACKING_STAGES.find(
+      (stage) => normalizeStatusInput(stage) === normalizedInput
+    );
+    const matchedBasicStatus = BOOKING_BASIC_STATUSES.find(
+      (s) => normalizeStatusInput(s) === normalizedInput
+    );
+    const dbStatus = mapTrackingStageToDbStatus(status);
+    if (!matchedDetailedStage && !matchedBasicStatus && !dbStatus) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status. Valid statuses are: ${[
+          ...BOOKING_TRACKING_STAGES,
+          ...BOOKING_BASIC_STATUSES
+        ].join(", ")}`
+      });
+    }
+
+    const updateStatus = dbStatus || matchedBasicStatus || "pending";
+    const historyEntry = {
+      status: matchedDetailedStage || status,
+      timestamp: new Date(),
+      updatedBy: req.user?.id || req.user?.role || "system"
+    };
+
+    const [booking, manual] = await Promise.all([
+      BookingStatus.findOneAndUpdate(
+        { consignmentNumber: cn },
+        {
+          $set: {
+            status: updateStatus,
+            ...(normalizeStatusInput(updateStatus) === "delivered" ? { deliveryDate: new Date() } : {})
+          },
+          $push: { statusHistory: historyEntry }
+        },
+        { new: true }
+      ),
+      ManualBooking.findOneAndUpdate(
+        { consignmentNo: cn },
+        {
+          $set: { status: updateStatus },
+          $push: { statusHistory: historyEntry }
+        },
+        { new: true }
+      )
+    ]);
+
+    if (!booking && !manual) {
+      return res.status(404).json({ success: false, message: "Booking not found for consignment" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Consignment status updated",
+      data: {
+        noteId: note._id,
+        noteNo: note.noteNo,
+        consignmentNumber: cn,
+        status: updateStatus,
+        booking: booking || null,
+        manualBooking: manual || null
+      }
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Server error", error: error.message });
