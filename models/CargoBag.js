@@ -26,6 +26,14 @@ const cargoBagSchema = new mongoose.Schema(
         trim: true
       }
     ],
+    /** CNs scanned during Receive Bag verification (persisted). */
+    receivedConsignmentNumbers: [
+      {
+        type: String,
+        uppercase: true,
+        trim: true
+      }
+    ],
     count: {
       type: Number,
       default: 0

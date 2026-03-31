@@ -82,7 +82,7 @@ const handleUploadError = (err, req, res, next) => {
 
 
 const adminController = require('../controllers/adminController');
-const { adminAuth, superAdminAuth } = require('../middleware/auth');
+const { adminAuth, superAdminAuth, pendingShipmentAuth } = require('../middleware/auth');
 
 router.post('/admin-login', auth.adminLogin);
 router.post('/logout', auth.logout);
@@ -123,6 +123,7 @@ router.put('/parcels/:consignmentNumber/status', arrivalScanController.updatePar
 
 // Booking Status
 router.get('/bookings/search', bookingStatusController.searchBookings);
+router.get('/bookings/pending-shipment', pendingShipmentAuth, bookingStatusController.getPendingShipmentBookings);
 router.get('/bookings', bookingStatusController.getAllBookings);
 router.get('/bookings/:consignmentNumber', bookingStatusController.getBookingByConsignmentNumber);
 router.put('/bookings/:consignmentNumber/status', bookingStatusController.updateBookingStatus);
@@ -262,10 +263,17 @@ router.post('/cargo/bags', cargoController.createBag);
 router.put('/cargo/bags/:id/in-transit', cargoController.markBagInTransit);
 router.put('/cargo/bags/:id/receive', cargoController.receiveBag);
 router.get('/cargo/bags/history', cargoController.getBagHistory);
+router.get('/cargo/bags/:id/detail', cargoController.getBagDetail);
+router.post('/cargo/bags/:id/check-consignments', cargoController.checkBagConsignments);
+router.put('/cargo/bags/:id/received-consignments', cargoController.updateBagReceivedConsignments);
 router.post('/cargo/manifests', cargoController.createManifest);
 router.put('/cargo/manifests/:id/receive', cargoController.receiveManifest);
 router.get('/cargo/manifests/pending-report', cargoController.getPendingManifestReport);
 router.get('/cargo/manifests/history', cargoController.getManifestHistory);
+router.get('/cargo/manifests/:id/detail', cargoController.getManifestDetail);
+router.post('/cargo/manifests/:id/check-consignments', cargoController.checkManifestConsignments);
+router.post('/cargo/manifests/:id/check-bags', cargoController.checkManifestBags);
+router.put('/cargo/manifests/:id/received-bags', cargoController.updateManifestReceivedBags);
 
 // First Mail — origin / destination arrival (explicit endpoints)
 router.post('/first-mail/origin-arrival', firstMailArrivalController.recordOriginArrival);

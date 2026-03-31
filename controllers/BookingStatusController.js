@@ -39,12 +39,55 @@ const BASIC_STATUSES = [
     'cancelled'
 ];
 
+/** UI / API typo fixes before matching TRACKING_STAGES */
+const STATUS_INPUT_ALIASES = {
+    'recieved by rider': 'received by rider'
+};
+
 const normalizeStatusInput = (value = '') => String(value).trim().toLowerCase();
+
+const resolveStatusInput = (value = '') => {
+    const n = normalizeStatusInput(value);
+    return STATUS_INPUT_ALIASES[n] || n;
+};
+
+/** Fallback label when `trackingStage` is not set (older rows). */
+const STATUS_ENUM_DISPLAY = {
+    pending: 'Pending',
+    'pending-pickup': 'Pending pickup',
+    'at-origin-facility': 'At origin facility / hub',
+    'at-destination-facility': 'At destination hub',
+    'in-transit': 'In transit',
+    delivered: 'Delivered',
+    returned: 'Returned',
+    cancelled: 'Cancelled'
+};
+
+function computeStatusDisplay(booking) {
+    if (!booking) return '';
+    const ts = booking.trackingStage;
+    if (ts != null && String(ts).trim() !== '') {
+        const t = String(ts).trim();
+        // Stored value may be enum slug (e.g. "in-transit") if an old client sent slugs
+        if (STATUS_ENUM_DISPLAY[t]) return STATUS_ENUM_DISPLAY[t];
+        return t;
+    }
+    const st = booking.status;
+    return STATUS_ENUM_DISPLAY[st] || st || '';
+}
 
 // Keep DB status enum-compatible while preserving detailed stage in statusHistory
 const mapTrackingStageToDbStatus = (rawStatus) => {
-    const normalized = normalizeStatusInput(rawStatus);
+    const normalized = resolveStatusInput(rawStatus);
+    // Clients may send stored enum slugs (e.g. "in-transit") instead of "In Transit"
+    if (normalized === 'in-transit') return 'in-transit';
+    if (normalized === 'pending-pickup') return 'pending-pickup';
+    if (normalized === 'at-origin-facility') return 'at-origin-facility';
+    if (normalized === 'at-destination-facility') return 'at-destination-facility';
+    if (normalized === 'pending') return 'pending';
     if (normalized === 'delivered') return 'delivered';
+    if (normalized === 'returned') return 'returned';
+    if (normalized === 'cancelled' || normalized === 'canceled') return 'cancelled';
     if (normalized === 'pending pickup') return 'pending-pickup';
     if (
         normalized === 'return to shipper' ||
@@ -66,7 +109,6 @@ const mapTrackingStageToDbStatus = (rawStatus) => {
         normalized === 'sms send'
     ) return 'in-transit';
     if (normalized === 'booking' || normalized === 'pending') return 'pending';
-    if (normalized === 'cancelled' || normalized === 'canceled') return 'cancelled';
     return null;
 };
 
@@ -172,7 +214,8 @@ exports.getAllBookings = async (req, res) => {
                 source: 'manual_booking',
                 serviceType: booking.serviceType,
                 originCity: booking.originCity,
-                productDetail: booking.productDetail
+                productDetail: booking.productDetail,
+                trackingStage: booking.trackingStage || undefined
             };
         });
 
@@ -209,6 +252,7 @@ exports.getAllBookings = async (req, res) => {
                     bookingObj.deliverySheet = null;
                 }
 
+                bookingObj.statusDisplay = computeStatusDisplay(bookingObj);
                 return bookingObj;
             })
         );
@@ -236,6 +280,130 @@ exports.getAllBookings = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Internal server error while retrieving bookings',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * All bookings except delivered — for Super Admin / Operation "Pending shipment" list.
+ */
+exports.getPendingShipmentBookings = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const pageNum = Math.max(1, parseInt(page, 10) || 1);
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
+        const skip = (pageNum - 1) * limitNum;
+
+        const notDelivered = { status: { $ne: 'delivered' } };
+
+        const [bookingStatusData, manualBookingData] = await Promise.all([
+            BookingStatus.find(notDelivered).sort({ bookingDate: -1 }).lean(),
+            ManualBooking.find(notDelivered).sort({ createdAt: -1 }).lean()
+        ]);
+
+        const rawCustomerIds = manualBookingData.map((b) => b.customerId).filter(Boolean);
+        const customerIds = [...new Set(rawCustomerIds.filter((id) => mongoose.Types.ObjectId.isValid(id)))];
+
+        const customers = await Customer.find({ _id: { $in: customerIds } })
+            .select('brandName username contactPerson');
+        const customerNameMap = new Map(
+            customers.map((c) => [
+                String(c._id),
+                c.brandName || c.username || c.contactPerson || 'Customer'
+            ])
+        );
+
+        const normalizedManualBookings = manualBookingData.map((booking) => {
+            const customerName =
+                customerNameMap.get(String(booking.customerId)) ||
+                booking.senderName ||
+                'Manual Entry';
+
+            return {
+                _id: booking._id,
+                consignmentNumber: booking.consignmentNo,
+                consigneeName: booking.consigneeName,
+                consigneeAddress: booking.consigneeAddress,
+                consigneeMobile: booking.consigneeMobile,
+                pieces: booking.pieces,
+                weight: booking.weight,
+                codAmount: booking.codAmount,
+                destinationCity: booking.destinationCity,
+                accountNo: 'MANUAL',
+                agentName: customerName,
+                status: booking.status,
+                bookingDate: booking.date || booking.createdAt,
+                createdAt: booking.createdAt,
+                updatedAt: booking.updatedAt,
+                remarks: booking.remarks || 'Manual Booking',
+                deliveryDate: booking.updatedAt,
+                id: booking._id,
+                source: 'manual_booking',
+                serviceType: booking.serviceType,
+                originCity: booking.originCity,
+                productDetail: booking.productDetail,
+                trackingStage: booking.trackingStage || undefined
+            };
+        });
+
+        const allBookings = [...bookingStatusData, ...normalizedManualBookings];
+        allBookings.sort(
+            (a, b) =>
+                new Date(b.bookingDate || b.createdAt) - new Date(a.bookingDate || a.createdAt)
+        );
+
+        const totalCount = allBookings.length;
+        const paginatedBookings = allBookings.slice(skip, skip + limitNum);
+
+        const bookingsWithDeliveryInfo = await Promise.all(
+            paginatedBookings.map(async (booking) => {
+                const deliverySheet = await DeliverySheetPhaseI.findOne({
+                    consignmentNumbers: booking.consignmentNumber
+                }).populate('rider', 'riderName riderCode mobileNo');
+
+                const bookingObj = booking.toObject ? booking.toObject() : booking;
+
+                if (deliverySheet) {
+                    bookingObj.deliverySheet = {
+                        _id: deliverySheet._id,
+                        riderId: deliverySheet.riderId,
+                        riderName: deliverySheet.riderName,
+                        riderCode: deliverySheet.riderCode,
+                        status: deliverySheet.status,
+                        createdAt: deliverySheet.createdAt,
+                        completedAt: deliverySheet.completedAt,
+                        rider: deliverySheet.rider
+                    };
+                } else {
+                    bookingObj.deliverySheet = null;
+                }
+
+                bookingObj.statusDisplay = computeStatusDisplay(bookingObj);
+                return bookingObj;
+            })
+        );
+
+        res.status(200).json({
+            success: true,
+            message: 'Pending shipment bookings retrieved successfully',
+            data: {
+                bookings: bookingsWithDeliveryInfo,
+                pagination: {
+                    currentPage: pageNum,
+                    totalPages: Math.ceil(totalCount / limitNum) || 1,
+                    totalCount,
+                    hasNextPage: pageNum < Math.ceil(totalCount / limitNum),
+                    hasPreviousPage: pageNum > 1,
+                    limit: limitNum
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error getting pending shipment bookings:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while retrieving pending shipment bookings',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
@@ -386,7 +554,8 @@ exports.searchBookings = async (req, res) => {
                 source: 'manual_booking',
                 serviceType: booking.serviceType,
                 originCity: booking.originCity,
-                productDetail: booking.productDetail
+                productDetail: booking.productDetail,
+                trackingStage: booking.trackingStage || undefined
             };
         });
 
@@ -412,6 +581,7 @@ exports.searchBookings = async (req, res) => {
                     completedAt: deliverySheet.completedAt,
                     rider: deliverySheet.rider
                 } : null;
+                bookingObj.statusDisplay = computeStatusDisplay(bookingObj);
                 return bookingObj;
             })
         );
@@ -528,6 +698,7 @@ exports.getBookingByConsignmentNumber = async (req, res) => {
                 serviceType: manual.serviceType,
                 originCity: manual.originCity,
                 productDetail: manual.productDetail,
+                trackingStage: manual.trackingStage,
                 toObject: function () { return this; }
             };
             isManual = true;
@@ -559,6 +730,7 @@ exports.getBookingByConsignmentNumber = async (req, res) => {
         bookingObj.cargo = cargo;
         const hist = bookingObj.statusHistory || [];
         bookingObj.arrival = getArrivalSummaryFromHistory(hist);
+        bookingObj.statusDisplay = computeStatusDisplay(bookingObj);
 
         res.status(200).json({
             success: true,
@@ -589,7 +761,7 @@ exports.updateBookingStatus = async (req, res) => {
             });
         }
 
-        const normalizedInput = normalizeStatusInput(status);
+        const normalizedInput = resolveStatusInput(status);
         const matchedDetailedStage = TRACKING_STAGES.find(
             (stage) => normalizeStatusInput(stage) === normalizedInput
         );
@@ -605,8 +777,18 @@ exports.updateBookingStatus = async (req, res) => {
             });
         }
 
-        // Persist enum-safe main status; detailed stage goes to statusHistory
-        const updateFields = { status: dbStatus || matchedBasicStatus || 'pending' };
+        const resolvedDbStatus = dbStatus || matchedBasicStatus || 'pending';
+
+        // Human label: TRACKING_STAGES string, or map enum slug (e.g. "in-transit") to display — never store raw slug as trackingStage
+        let timelineLabel = matchedDetailedStage;
+        if (!timelineLabel) {
+            timelineLabel = STATUS_ENUM_DISPLAY[resolvedDbStatus] || String(status).trim();
+        }
+
+        const updateFields = {
+            status: resolvedDbStatus,
+            trackingStage: String(timelineLabel).trim()
+        };
 
         if (remarks) updateFields.remarks = remarks;
         if (normalizeStatusInput(updateFields.status) === 'delivered') updateFields.deliveryDate = new Date();
@@ -634,7 +816,7 @@ exports.updateBookingStatus = async (req, res) => {
                 $set: updateFields,
                 $push: {
                     statusHistory: {
-                        status: matchedDetailedStage || status,
+                        status: timelineLabel,
                         timestamp: new Date(),
                         remarks: remarks || undefined,
                         updatedBy: req.user?.id || 'system'
@@ -650,10 +832,14 @@ exports.updateBookingStatus = async (req, res) => {
             manualUpdated = await ManualBooking.findOneAndUpdate(
                 { consignmentNo: consignmentNumber.toUpperCase() },
                 {
-                    $set: { status: updateFields.status },
+                    $set: {
+                        status: updateFields.status,
+                        trackingStage: updateFields.trackingStage,
+                        ...(remarks ? { remarks } : {})
+                    },
                     $push: {
                         statusHistory: {
-                            status: matchedDetailedStage || status,
+                            status: timelineLabel,
                             timestamp: new Date(),
                             remarks: remarks || undefined,
                             updatedBy: req.user?.id || 'system'
@@ -672,7 +858,7 @@ exports.updateBookingStatus = async (req, res) => {
         }
 
         try {
-            if (status === 'delivered') {
+            if (updateFields.status === 'delivered') {
                 await DeliverySheetPhaseI.findOneAndUpdate(
                     { consignmentNumbers: consignmentNumber.toUpperCase() },
                     { status: 'delivered' }
@@ -690,6 +876,7 @@ exports.updateBookingStatus = async (req, res) => {
                 _id: manualUpdated._id,
                 consignmentNumber: manualUpdated.consignmentNo,
                 status: manualUpdated.status,
+                trackingStage: manualUpdated.trackingStage,
                 remarks: manualUpdated.remarks,
                 updatedAt: manualUpdated.updatedAt
             };
@@ -697,10 +884,13 @@ exports.updateBookingStatus = async (req, res) => {
         const hist = booking ? booking.statusHistory : manualUpdated.statusHistory;
         const arrival = getArrivalSummaryFromHistory(hist || []);
 
+        const merged = { ...payload, cargo, arrival };
+        merged.statusDisplay = computeStatusDisplay(merged);
+
         res.status(200).json({
             success: true,
             message: 'Booking status updated successfully',
-            data: { ...payload, cargo, arrival }
+            data: merged
         });
 
     } catch (error) {

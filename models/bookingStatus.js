@@ -77,6 +77,11 @@ const bookingStatusSchema = new mongoose.Schema({
         ],
         default: 'pending'
     },
+    /** Human-readable tracking stage (e.g. "2nd Attempt Out For Delivery"); multiple stages share the same `status` enum. */
+    trackingStage: {
+        type: String,
+        trim: true
+    },
     statusHistory: [
         {
             status: { type: String },
