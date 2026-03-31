@@ -33,6 +33,18 @@ const codSlipUpload = multer({
 exports.uploadCodBankSlip = codSlipUpload.single("bankSlip");
 
 const ALLOWED_ROLES = ["superAdmin", "admin", "operation", "operationPortal"];
+const RECEIVE_NOTE_STATUSES = [
+  "close",
+  "incomplete",
+  "refused",
+  "untracable addrress",
+  "delivered",
+  "call not responsding",
+  "costumer want delivery tomorrow",
+  "out of city",
+  "forcefully open return",
+  "allow to open as per shipper"
+];
 
 const assertRole = (req) => req.user && ALLOWED_ROLES.includes(req.user.role);
 
@@ -70,19 +82,11 @@ async function resolveConsignment(cn) {
 
 async function getBookingRowForCn(cn) {
   const upper = normalizeCn(cn);
-  const bs = await BookingStatus.findOne({ consignmentNumber: upper })
-    .select(
-      "consignmentNumber codAmount status consigneeName consigneeMobile destinationCity originCity bookingDate deliveryDate cashCollectedAt codBankSlipUrl weight pieces"
-    )
-    .lean();
+  const bs = await BookingStatus.findOne({ consignmentNumber: upper }).lean();
   if (bs) {
     return { source: "booking_status", row: bs, consignmentNumber: upper };
   }
-  const mb = await ManualBooking.findOne({ consignmentNo: upper })
-    .select(
-      "consignmentNo codAmount status consigneeName consigneeMobile destinationCity originCity date createdAt updatedAt cashCollectedAt codBankSlipUrl weight pieces"
-    )
-    .lean();
+  const mb = await ManualBooking.findOne({ consignmentNo: upper }).lean();
   if (mb) {
     return {
       source: "manual_booking",
@@ -612,9 +616,10 @@ exports.listReceiveNotes = async (req, res) => {
     const size = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
     const skip = (pageNo - 1) * size;
 
-    const { status } = req.query;
+    const { status, receiveStatus } = req.query;
     const query = {};
     if (status) query.status = status;
+    if (receiveStatus) query.receiveStatus = String(receiveStatus).trim().toLowerCase();
     const [notes, total] = await Promise.all([
       LastMailDeliveryNote.find(query)
         .populate("riderId", "riderName riderCode mobileNo active")
@@ -698,7 +703,7 @@ exports.updateReceiveNote = async (req, res) => {
     }
 
     const { id } = req.params;
-    const { remarks } = req.body;
+    const { remarks, receiveStatus } = req.body;
 
     const note = await LastMailDeliveryNote.findById(id);
     if (!note) {
@@ -707,6 +712,23 @@ exports.updateReceiveNote = async (req, res) => {
 
     if (remarks !== undefined) {
       note.remarks = String(remarks || "").trim();
+    }
+    if (receiveStatus !== undefined) {
+      const normalized = String(receiveStatus || "")
+        .trim()
+        .toLowerCase();
+      if (!normalized) {
+        note.receiveStatus = undefined;
+        note.receiveStatusAt = undefined;
+      } else if (!RECEIVE_NOTE_STATUSES.includes(normalized)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid receiveStatus"
+        });
+      } else {
+        note.receiveStatus = normalized;
+        note.receiveStatusAt = new Date();
+      }
     }
 
     await note.save();

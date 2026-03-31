@@ -39,6 +39,11 @@ const cargoBagSchema = new mongoose.Schema(
       type: String,
       trim: true
     },
+    seal: {
+      type: String,
+      trim: true,
+      uppercase: true
+    },
     createdByRole: {
       type: String,
       trim: true

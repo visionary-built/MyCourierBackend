@@ -27,7 +27,23 @@ const deliverySheetPhaseISchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['active', 'pending', 'in-transit', 'delivered', 'cancelled', 'completed'],
+    enum: [
+      'active',
+      'pending',
+      'in-transit',
+      'delivered',
+      'cancelled',
+      'completed',
+      'close',
+      'incomplete',
+      'refused',
+      'untracable addrress',
+      'call not responsding',
+      'costumer want delivery tomorrow',
+      'out of city',
+      'forcefully open return',
+      'allow to open as per shipper'
+    ],
     default: 'active'
   },
   createdAt: {

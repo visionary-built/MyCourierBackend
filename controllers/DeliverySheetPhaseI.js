@@ -4,6 +4,77 @@ const BookingStatus = require('../models/bookingStatus');
 const DeliverySheetPhaseI = require('../models/DeliverySheetPhaseI');
 const { getCargoContext } = require('../services/cargoLinkageService');
 const { assignConsignmentToRider } = require('../services/deliveryAssignmentService');
+
+const normalizeCn = (cn) => String(cn || '').trim().toUpperCase();
+
+const BOOKING_STATUS_LIST_FIELDS =
+  'consignmentNumber consigneeName consigneeAddress consigneeMobile destinationCity originCity weight codAmount pieces accountNo agentName status bookingDate deliveryDate remarks referenceNo';
+const MANUAL_BOOKING_LIST_FIELDS =
+  'consignmentNo consigneeName consigneeAddress consigneeMobile destinationCity originCity weight codAmount pieces status date createdAt updatedAt senderName productDetail customerReferenceNo remarks orderId';
+
+/**
+ * Load booking / manual rows for many CNs. BookingStatus wins if both exist.
+ * @returns {Map<string, object>}
+ */
+async function loadBookingsByConsignmentNumbers(consignmentNumbers) {
+  const uniq = [...new Set((consignmentNumbers || []).map(normalizeCn))].filter(Boolean);
+  const map = new Map();
+  if (uniq.length === 0) return map;
+
+  const [bsList, mbList] = await Promise.all([
+    BookingStatus.find({ consignmentNumber: { $in: uniq } }).select(BOOKING_STATUS_LIST_FIELDS).lean(),
+    ManualBooking.find({ consignmentNo: { $in: uniq } }).select(MANUAL_BOOKING_LIST_FIELDS).lean()
+  ]);
+
+  bsList.forEach((b) => {
+    map.set(b.consignmentNumber, { ...b, source: 'booking_status' });
+  });
+  mbList.forEach((m) => {
+    const cn = normalizeCn(m.consignmentNo);
+    if (!map.has(cn)) {
+      map.set(cn, {
+        consignmentNumber: cn,
+        consigneeName: m.consigneeName,
+        consigneeAddress: m.consigneeAddress,
+        consigneeMobile: m.consigneeMobile,
+        destinationCity: m.destinationCity,
+        originCity: m.originCity,
+        weight: m.weight,
+        codAmount: m.codAmount,
+        pieces: m.pieces,
+        status: m.status,
+        bookingDate: m.date || m.createdAt,
+        deliveryDate: m.updatedAt,
+        remarks: m.remarks,
+        accountNo: null,
+        agentName: null,
+        referenceNo: m.customerReferenceNo,
+        orderId: m.orderId,
+        source: 'manual_booking'
+      });
+    }
+  });
+  return map;
+}
+
+function attachBookingsToSheetDocs(sheetDocs, bookingMap) {
+  return sheetDocs.map((sheet) => {
+    const obj = sheet.toObject ? sheet.toObject({ virtuals: true }) : { ...sheet };
+    const cns = obj.consignmentNumbers || [];
+    obj.bookings = cns.map((cn) => {
+      const key = normalizeCn(cn);
+      return (
+        bookingMap.get(key) || {
+          consignmentNumber: key,
+          source: null,
+          missingBooking: true
+        }
+      );
+    });
+    return obj;
+  });
+}
+
 // Get all active riders for selection
 const getActiveRiders = async (req, res) => {
   try {
@@ -499,10 +570,14 @@ const getAllDeliverySheets = async (req, res) => {
 
     const total = await DeliverySheetPhaseI.countDocuments(query);
 
+    const allCns = deliverySheets.reduce((acc, s) => acc.concat(s.consignmentNumbers || []), []);
+    const bookingMap = await loadBookingsByConsignmentNumbers(allCns);
+    const deliverySheetsWithBookings = attachBookingsToSheetDocs(deliverySheets, bookingMap);
+
     res.status(200).json({
       success: true,
       data: {
-        deliverySheets,
+        deliverySheets: deliverySheetsWithBookings,
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
@@ -535,10 +610,17 @@ const getDeliverySheetById = async (req, res) => {
       });
     }
 
-    // Get parcel details
-    const parcels = await BookingStatus.find({
-      consignmentNumber: { $in: deliverySheet.consignmentNumbers }
-    }).select('consignmentNumber destinationCity accountNo agentName status bookingDate deliveryDate remarks');
+    const bookingMap = await loadBookingsByConsignmentNumbers(deliverySheet.consignmentNumbers);
+    const parcels = (deliverySheet.consignmentNumbers || []).map((cn) => {
+      const key = normalizeCn(cn);
+      return (
+        bookingMap.get(key) || {
+          consignmentNumber: key,
+          source: null,
+          missingBooking: true
+        }
+      );
+    });
 
     res.status(200).json({
       success: true,
@@ -556,7 +638,23 @@ const getDeliverySheetById = async (req, res) => {
   }
 };
 
-const DELIVERY_SHEET_STATUSES = ['active', 'pending', 'in-transit', 'delivered', 'cancelled', 'completed'];
+const DELIVERY_SHEET_STATUSES = [
+  'active',
+  'pending',
+  'in-transit',
+  'delivered',
+  'cancelled',
+  'completed',
+  'close',
+  'incomplete',
+  'refused',
+  'untracable addrress',
+  'call not responsding',
+  'costumer want delivery tomorrow',
+  'out of city',
+  'forcefully open return',
+  'allow to open as per shipper'
+];
 
 // Admin: update a delivery sheet by document id (e.g. edit modal)
 const updateDeliverySheetById = async (req, res) => {
