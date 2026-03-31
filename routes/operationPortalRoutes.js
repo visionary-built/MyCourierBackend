@@ -203,6 +203,10 @@ router.delete(
   '/last-mail/receive-notes/:id/entries/:consignmentNumber',
   lastMailNotesController.removeDeliveryNoteEntry
 );
+router.put(
+  '/last-mail/receive-notes/:id/entries/:consignmentNumber/status',
+  lastMailNotesController.updateReceiveNoteConsignmentStatus
+);
 router.get('/last-mail/pending-cash-collection', lastMailNotesController.getPendingCashCollection);
 router.post(
   '/last-mail/pending-cash-collection/collect',
