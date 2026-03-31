@@ -181,6 +181,20 @@ const operationAuth = (req, res, next) => {
   });
 };
 
+/** Super admin, admin, operation, or operation portal — excludes COD client roles from admin router. */
+const pendingShipmentAuth = (req, res, next) => {
+  adminAuth(req, res, () => {
+    const allowed = ['superAdmin', 'admin', 'operation', 'operationPortal'];
+    if (!req.user || !allowed.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: pending shipment requires super admin or operation role'
+      });
+    }
+    next();
+  });
+};
+
 // Middleware to verify COD Client Portal token
 const authenticateCodClient = async (req, res, next) => {
   try {
@@ -231,5 +245,6 @@ module.exports = {
   adminAuth,
   superAdminAuth,
   operationAuth,
+  pendingShipmentAuth,
   authenticateCodClient
 };

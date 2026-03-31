@@ -34,6 +34,14 @@ const cargoManifestSchema = new mongoose.Schema(
         trim: true
       }
     ],
+    /** Bags scanned/received at destination during Receive Manifest verification (persisted). */
+    receivedBagNumbers: [
+      {
+        type: String,
+        uppercase: true,
+        trim: true
+      }
+    ],
     originCity: {
       type: String,
       required: true,

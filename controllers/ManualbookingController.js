@@ -924,7 +924,8 @@ exports.getManualBookingStats = async (req, res) => {
     bookings.forEach((b) => {
       totalCodAmount += b.codAmount || 0;
       if (b.status === "delivered") deliveredShipments += 1;
-      if (b.status === "pending") pendingShipments += 1;
+      // Pending shipment = not yet delivered (in-transit, pending-pickup, at-destination, etc.)
+      if (b.status !== "delivered") pendingShipments += 1;
       if (b.status === "pending-pickup") pendingPickupShipments += 1;
 
       const key = b.customerId != null && String(b.customerId).trim() !== ""
@@ -943,7 +944,7 @@ exports.getManualBookingStats = async (req, res) => {
       agg.bookingCount += 1;
       agg.totalCodAmount += b.codAmount || 0;
       if (b.status === "delivered") agg.deliveredCount += 1;
-      if (b.status === "pending") agg.pendingCount += 1;
+      if (b.status !== "delivered") agg.pendingCount += 1;
       if (b.status === "pending-pickup") agg.pendingPickupCount += 1;
     });
 

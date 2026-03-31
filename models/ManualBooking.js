@@ -71,6 +71,8 @@ const ManualBookingSchema = new mongoose.Schema({
     ],
     default: 'pending'
   },
+  /** Human-readable tracking stage; multiple stages share the same `status` enum (e.g. in-transit). */
+  trackingStage: { type: String, trim: true },
   statusHistory: [
     {
       status: { type: String },
