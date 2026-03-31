@@ -19,8 +19,9 @@ exports.createBag = async (req, res) => {
       return res.status(403).json({ success: false, message: "Access denied" });
     }
 
-    const { originCity, destinationCity, consignmentNumbers = [], remarks } = req.body;
+    const { originCity, destinationCity, consignmentNumbers = [], remarks, seal } = req.body;
     const normalizedCNs = normalizeCN(consignmentNumbers);
+    const normalizedSeal = seal != null ? String(seal).trim().toUpperCase() : undefined;
 
     if (!originCity || !destinationCity || normalizedCNs.length === 0) {
       return res.status(400).json({
@@ -56,6 +57,7 @@ exports.createBag = async (req, res) => {
       destinationCity,
       consignmentNumbers: normalizedCNs,
       remarks,
+      seal: normalizedSeal,
       createdByRole: req.user.role,
       createdById: String(req.user.id || req.user._id || "")
     });

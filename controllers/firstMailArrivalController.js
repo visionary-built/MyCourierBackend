@@ -55,14 +55,16 @@ exports.recordDestinationArrival = async (req, res) => {
     if (!assertRole(req)) {
       return res.status(403).json({ success: false, message: "Access denied" });
     }
-    const { consignmentNumber, remarks } = req.body;
+    const { consignmentNumber, remarks, weight, pieces } = req.body;
     if (!consignmentNumber) {
       return res.status(400).json({ success: false, message: "consignmentNumber is required" });
     }
 
     const result = await applyDestinationArrival(consignmentNumber, {
       remarks,
-      updatedBy: req.user.role
+      updatedBy: req.user.role,
+      weight,
+      pieces
     });
 
     if (!result.ok) {

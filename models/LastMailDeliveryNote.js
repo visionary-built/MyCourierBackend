@@ -28,6 +28,22 @@ const lastMailDeliveryNoteSchema = new mongoose.Schema(
       default: "open"
     },
     remarks: { type: String, trim: true },
+    receiveStatus: {
+      type: String,
+      enum: [
+        "close",
+        "incomplete",
+        "refused",
+        "untracable addrress",
+        "delivered",
+        "call not responsding",
+        "costumer want delivery tomorrow",
+        "out of city",
+        "forcefully open return",
+        "allow to open as per shipper"
+      ]
+    },
+    receiveStatusAt: { type: Date },
     /** Set when user submits the note (handoff from scanning — not final archive). */
     submittedAt: { type: Date },
     closedAt: { type: Date },
