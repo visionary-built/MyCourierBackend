@@ -45,6 +45,30 @@ const RECEIVE_NOTE_STATUSES = [
   "forcefully open return",
   "allow to open as per shipper"
 ];
+const RECEIVE_TO_BOOKING_STATUS = {
+  delivered: "delivered",
+  refused: "returned",
+  "forcefully open return": "returned",
+  close: "pending",
+  incomplete: "in-transit",
+  "untracable addrress": "in-transit",
+  "call not responsding": "in-transit",
+  "costumer want delivery tomorrow": "in-transit",
+  "out of city": "in-transit",
+  "allow to open as per shipper": "in-transit"
+};
+const RECEIVE_TO_TRACKING_STAGE = {
+  delivered: "Delivered",
+  refused: "Return To Shipper",
+  "forcefully open return": "Return To Office",
+  close: "Booking",
+  incomplete: "1st Attempt Delivery",
+  "untracable addrress": "Not At Home",
+  "call not responsding": "Not Responding",
+  "costumer want delivery tomorrow": "2nd Attempt Out For Delivery",
+  "out of city": "Return To Office",
+  "allow to open as per shipper": "In Transit"
+};
 
 const assertRole = (req) => req.user && ALLOWED_ROLES.includes(req.user.role);
 
@@ -714,6 +738,19 @@ exports.updateReceiveNote = async (req, res) => {
       note.remarks = String(remarks || "").trim();
     }
     if (receiveStatus !== undefined) {
+      // Lock receive-status after closure: once marked "close", no further status edits.
+      if (note.receiveStatus === "close") {
+        const nextNormalized = String(receiveStatus || "")
+          .trim()
+          .toLowerCase();
+        if (nextNormalized && nextNormalized !== "close") {
+          return res.status(400).json({
+            success: false,
+            message: "Receive status is locked after close"
+          });
+        }
+      }
+
       const normalized = String(receiveStatus || "")
         .trim()
         .toLowerCase();
@@ -728,6 +765,36 @@ exports.updateReceiveNote = async (req, res) => {
       } else {
         note.receiveStatus = normalized;
         note.receiveStatusAt = new Date();
+
+        const bookingStatus = RECEIVE_TO_BOOKING_STATUS[normalized];
+        const cns = (note.entries || []).map((e) => normalizeCn(e.consignmentNumber)).filter(Boolean);
+        if (bookingStatus && cns.length > 0) {
+          const detailedStage = RECEIVE_TO_TRACKING_STAGE[normalized] || bookingStatus;
+          const actionRemarks = `Receive note action: ${normalized}`;
+          const timelineEntry = {
+            status: detailedStage,
+            timestamp: new Date(),
+            remarks: actionRemarks,
+            updatedBy: req.user.role
+          };
+
+          await Promise.all([
+            BookingStatus.updateMany(
+              { consignmentNumber: { $in: cns } },
+              {
+                $set: { status: bookingStatus, remarks: actionRemarks },
+                $push: { statusHistory: timelineEntry }
+              }
+            ),
+            ManualBooking.updateMany(
+              { consignmentNo: { $in: cns } },
+              {
+                $set: { status: bookingStatus, remarks: actionRemarks },
+                $push: { statusHistory: timelineEntry }
+              }
+            )
+          ]);
+        }
       }
     }
 
