@@ -47,6 +47,7 @@ exports.createRider = async (req, res) => {
       cnicNo,
       address,
       emergencyContact,
+      city,
       active = true,
       password
     } = req.body;
@@ -63,6 +64,7 @@ exports.createRider = async (req, res) => {
       cnicNo,
       address,
       emergencyContact,
+      city,
       active,
       password: finalPassword
     });
@@ -115,8 +117,15 @@ exports.getAllRiders = async (req, res) => {
         { soName: { $regex: search, $options: 'i' } },
         { mobileNo: { $regex: search, $options: 'i' } },
         { cnicNo: { $regex: search, $options: 'i' } },
-        { address: { $regex: search, $options: 'i' } }
+        { address: { $regex: search, $options: 'i' } },
+        { city: { $regex: search, $options: 'i' } }
       ];
+    }
+
+    const cityFilter = req.query.city || req.query.destinationCity;
+    if (cityFilter && String(cityFilter).trim()) {
+      const escaped = String(cityFilter).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      query.city = new RegExp(`^${escaped}$`, 'i');
     }
 
     if (status !== undefined) {

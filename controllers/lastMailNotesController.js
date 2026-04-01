@@ -182,6 +182,113 @@ async function getBookingRowForCn(cn) {
   return { source: null, row: null, consignmentNumber: upper };
 }
 
+/**
+ * Live label for the Receive Note "Receiving" column (and print/PDF).
+ * Prefers `trackingStage` when set; otherwise formats DB `status` (e.g. in-transit → "In Transit").
+ */
+function buildReceivingStatusLabel(row) {
+  if (!row) return null;
+  const stage = row.trackingStage && String(row.trackingStage).trim();
+  if (stage) return stage;
+  const s = row.status;
+  if (!s) return null;
+  return s
+    .split("-")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
+/**
+ * Mutates `note.entries[].receivingSheetStatus` for the CN. Caller must `markModified('entries')` and `save()`.
+ * @returns {{ success: true, data: object } | { success: false, statusCode: number, message: string }}
+ */
+async function updateReceiveNoteEntryStatusCore(note, cnParam, status, req) {
+  if (!String(note.noteNo || "").toUpperCase().startsWith("DN")) {
+    return { success: false, statusCode: 400, message: "Only DN notes can update CN status here" };
+  }
+
+  const cn = normalizeCn(decodeURIComponent(String(cnParam || "").trim()));
+  if (status === undefined || status === null || String(status).trim() === "") {
+    return { success: false, statusCode: 400, message: "status is required" };
+  }
+
+  const existsOnNote = (note.entries || []).some((e) => normalizeCn(e.consignmentNumber) === cn);
+  if (!existsOnNote) {
+    return { success: false, statusCode: 404, message: "Consignment not found on this note" };
+  }
+
+  const normalizedInput = normalizeStatusInput(status);
+  const matchedDetailedStage = BOOKING_TRACKING_STAGES.find(
+    (stage) => normalizeStatusInput(stage) === normalizedInput
+  );
+  const matchedBasicStatus = BOOKING_BASIC_STATUSES.find(
+    (s) => normalizeStatusInput(s) === normalizedInput
+  );
+  const dbStatus = mapTrackingStageToDbStatus(status);
+  if (!matchedDetailedStage && !matchedBasicStatus && !dbStatus) {
+    return {
+      success: false,
+      statusCode: 400,
+      message: `Invalid status. Valid statuses are: ${[
+        ...BOOKING_TRACKING_STAGES,
+        ...BOOKING_BASIC_STATUSES
+      ].join(", ")}`
+    };
+  }
+
+  const updateStatus = dbStatus || matchedBasicStatus || "pending";
+  const historyEntry = {
+    status: matchedDetailedStage || status,
+    timestamp: new Date(),
+    updatedBy: req.user?.id || req.user?.role || "system"
+  };
+
+  const [booking, manual] = await Promise.all([
+    BookingStatus.findOneAndUpdate(
+      { consignmentNumber: cn },
+      {
+        $set: {
+          status: updateStatus,
+          ...(normalizeStatusInput(updateStatus) === "delivered" ? { deliveryDate: new Date() } : {})
+        },
+        $push: { statusHistory: historyEntry }
+      },
+      { new: true }
+    ),
+    ManualBooking.findOneAndUpdate(
+      { consignmentNo: cn },
+      {
+        $set: { status: updateStatus },
+        $push: { statusHistory: historyEntry }
+      },
+      { new: true }
+    )
+  ]);
+
+  if (!booking && !manual) {
+    return { success: false, statusCode: 404, message: "Booking not found for consignment" };
+  }
+
+  let displayLabel =
+    matchedDetailedStage || buildReceivingStatusLabel({ status: updateStatus, trackingStage: null });
+  if (!displayLabel) displayLabel = String(status).trim();
+  const entryIdx = (note.entries || []).findIndex((ent) => normalizeCn(ent.consignmentNumber) === cn);
+  if (entryIdx >= 0) {
+    note.entries[entryIdx].receivingSheetStatus = displayLabel;
+  }
+
+  return {
+    success: true,
+    data: {
+      consignmentNumber: cn,
+      status: updateStatus,
+      receivingSheetStatus: displayLabel,
+      booking: booking || null,
+      manualBooking: manual || null
+    }
+  };
+}
+
 function computeNoteStatsFromEntries(entries, bookingByCn) {
   let deliveredCount = 0;
   let deliveredCodAmount = 0;
@@ -707,7 +814,7 @@ exports.listReceiveNotes = async (req, res) => {
     if (receiveStatus) query.receiveStatus = String(receiveStatus).trim().toLowerCase();
     const [notes, total] = await Promise.all([
       LastMailDeliveryNote.find(query)
-        .populate("riderId", "riderName riderCode mobileNo active")
+        .populate("riderId", "riderName riderCode mobileNo active city")
         .sort({ updatedAt: -1 })
         .skip(skip)
         .limit(size)
@@ -746,7 +853,7 @@ exports.getReceiveNoteDetail = async (req, res) => {
       return res.status(403).json({ success: false, message: "Access denied" });
     }
     const note = await LastMailDeliveryNote.findById(req.params.id)
-      .populate("riderId", "riderName riderCode mobileNo active address cnicNo")
+      .populate("riderId", "riderName riderCode mobileNo active address cnicNo city")
       .lean();
     if (!note) {
       return res.status(404).json({ success: false, message: "Note not found" });
@@ -755,11 +862,17 @@ exports.getReceiveNoteDetail = async (req, res) => {
     const entryDetails = await Promise.all(
       (note.entries || []).map(async (e) => {
         const { source, row } = await getBookingRowForCn(e.consignmentNumber);
+        const sheetStatus = e.receivingSheetStatus && String(e.receivingSheetStatus).trim();
         return {
           scan: e,
           consignmentNumber: normalizeCn(e.consignmentNumber),
           currentBooking: row,
-          source
+          source,
+          /**
+           * Receive DN sheet / PDF "Receiving" column — only set after receive-note status update endpoint.
+           * Null until then (leave cell empty for signature; do not use booking status in this column).
+           */
+          receivingStatus: sheetStatus || null
         };
       })
     );
@@ -895,66 +1008,14 @@ exports.updateReceiveNoteConsignmentStatus = async (req, res) => {
 
     const note = await LastMailDeliveryNote.findById(id);
     if (!note) return res.status(404).json({ success: false, message: "Note not found" });
-    if (!String(note.noteNo || "").toUpperCase().startsWith("DN")) {
-      return res.status(400).json({ success: false, message: "Only DN notes can update CN status here" });
+
+    const result = await updateReceiveNoteEntryStatusCore(note, consignmentNumber, status, req);
+    if (!result.success) {
+      return res.status(result.statusCode).json({ success: false, message: result.message });
     }
 
-    const cn = normalizeCn(decodeURIComponent(consignmentNumber || ""));
-    const existsOnNote = (note.entries || []).some((e) => normalizeCn(e.consignmentNumber) === cn);
-    if (!existsOnNote) {
-      return res.status(404).json({ success: false, message: "Consignment not found on this note" });
-    }
-
-    const normalizedInput = normalizeStatusInput(status);
-    const matchedDetailedStage = BOOKING_TRACKING_STAGES.find(
-      (stage) => normalizeStatusInput(stage) === normalizedInput
-    );
-    const matchedBasicStatus = BOOKING_BASIC_STATUSES.find(
-      (s) => normalizeStatusInput(s) === normalizedInput
-    );
-    const dbStatus = mapTrackingStageToDbStatus(status);
-    if (!matchedDetailedStage && !matchedBasicStatus && !dbStatus) {
-      return res.status(400).json({
-        success: false,
-        message: `Invalid status. Valid statuses are: ${[
-          ...BOOKING_TRACKING_STAGES,
-          ...BOOKING_BASIC_STATUSES
-        ].join(", ")}`
-      });
-    }
-
-    const updateStatus = dbStatus || matchedBasicStatus || "pending";
-    const historyEntry = {
-      status: matchedDetailedStage || status,
-      timestamp: new Date(),
-      updatedBy: req.user?.id || req.user?.role || "system"
-    };
-
-    const [booking, manual] = await Promise.all([
-      BookingStatus.findOneAndUpdate(
-        { consignmentNumber: cn },
-        {
-          $set: {
-            status: updateStatus,
-            ...(normalizeStatusInput(updateStatus) === "delivered" ? { deliveryDate: new Date() } : {})
-          },
-          $push: { statusHistory: historyEntry }
-        },
-        { new: true }
-      ),
-      ManualBooking.findOneAndUpdate(
-        { consignmentNo: cn },
-        {
-          $set: { status: updateStatus },
-          $push: { statusHistory: historyEntry }
-        },
-        { new: true }
-      )
-    ]);
-
-    if (!booking && !manual) {
-      return res.status(404).json({ success: false, message: "Booking not found for consignment" });
-    }
+    note.markModified("entries");
+    await note.save();
 
     return res.status(200).json({
       success: true,
@@ -962,10 +1023,84 @@ exports.updateReceiveNoteConsignmentStatus = async (req, res) => {
       data: {
         noteId: note._id,
         noteNo: note.noteNo,
-        consignmentNumber: cn,
-        status: updateStatus,
-        booking: booking || null,
-        manualBooking: manual || null
+        ...result.data
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+/**
+ * Bulk update selected consignments on a DN receive note (one save from the UI).
+ * Body: { "updates": [ { "consignmentNumber": "CN...", "status": "Delivered" }, ... ] }
+ */
+exports.bulkUpdateReceiveNoteConsignmentStatuses = async (req, res) => {
+  try {
+    if (!assertRole(req)) {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+
+    const { id } = req.params;
+    const { updates } = req.body;
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Request body must include a non-empty "updates" array: [{ consignmentNumber, status }, ...]'
+      });
+    }
+    if (updates.length > 200) {
+      return res.status(400).json({
+        success: false,
+        message: "Too many rows in one request (max 200)"
+      });
+    }
+
+    const note = await LastMailDeliveryNote.findById(id);
+    if (!note) return res.status(404).json({ success: false, message: "Note not found" });
+
+    const results = [];
+    for (const item of updates) {
+      const cnRaw = item && item.consignmentNumber;
+      const st = item && item.status;
+      if (!cnRaw || st === undefined || st === null || String(st).trim() === "") {
+        results.push({
+          consignmentNumber: cnRaw ? normalizeCn(cnRaw) : null,
+          success: false,
+          message: "consignmentNumber and status are required"
+        });
+        continue;
+      }
+      const r = await updateReceiveNoteEntryStatusCore(note, cnRaw, st, req);
+      if (r.success) {
+        results.push({
+          consignmentNumber: r.data.consignmentNumber,
+          success: true,
+          data: r.data
+        });
+      } else {
+        results.push({
+          consignmentNumber: normalizeCn(cnRaw),
+          success: false,
+          message: r.message,
+          statusCode: r.statusCode
+        });
+      }
+    }
+
+    note.markModified("entries");
+    await note.save();
+
+    const updatedCount = results.filter((x) => x.success).length;
+
+    return res.status(200).json({
+      success: true,
+      message: `Updated ${updatedCount} of ${results.length} consignment(s)`,
+      data: {
+        noteId: note._id,
+        noteNo: note.noteNo,
+        results,
+        updatedCount
       }
     });
   } catch (error) {

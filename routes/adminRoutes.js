@@ -303,6 +303,10 @@ router.delete(
   lastMailNotesController.removeDeliveryNoteEntry
 );
 router.put(
+  '/last-mail/receive-notes/:id/entries/bulk-status',
+  lastMailNotesController.bulkUpdateReceiveNoteConsignmentStatuses
+);
+router.put(
   '/last-mail/receive-notes/:id/entries/:consignmentNumber/status',
   lastMailNotesController.updateReceiveNoteConsignmentStatus
 );

@@ -10,7 +10,12 @@ const scanEntrySchema = new mongoose.Schema(
     destinationCity: { type: String, trim: true },
     codAmount: { type: Number, default: 0 },
     weight: { type: Number },
-    source: { type: String, enum: ["booking_status", "manual_booking"], required: true }
+    source: { type: String, enum: ["booking_status", "manual_booking"], required: true },
+    /**
+     * Shown on DN Receive sheet "Receiving" column only after status is saved via
+     * receive-note update (PUT .../receive-notes/:id/entries/:cn/status). Empty until then (signature space).
+     */
+    receivingSheetStatus: { type: String, trim: true }
   },
   { _id: true }
 );

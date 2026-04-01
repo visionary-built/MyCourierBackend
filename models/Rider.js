@@ -45,6 +45,12 @@ const riderSchema = new mongoose.Schema({
     trim: true,
     maxlength: [500, 'Emergency contact cannot exceed 500 characters']
   },
+  /** Operating / delivery city — used to match parcels by destinationCity (case-insensitive). */
+  city: {
+    type: String,
+    trim: true,
+    maxlength: [100, 'City cannot exceed 100 characters']
+  },
   active: {
     type: Boolean,
     default: true

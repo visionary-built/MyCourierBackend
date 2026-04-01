@@ -49,6 +49,13 @@ const validateRider = [
     .withMessage('Emergency contact is required')
     .isLength({ max: 500 })
     .withMessage('Emergency contact cannot exceed 500 characters'),
+
+  body('city')
+    .trim()
+    .notEmpty()
+    .withMessage('City is required')
+    .isLength({ max: 100 })
+    .withMessage('City cannot exceed 100 characters'),
   
   body('active')
     .optional()

@@ -6,6 +6,12 @@ const { getCargoContext } = require("./cargoLinkageService");
 
 const CN_REGEX = /^[A-Z0-9]+$/;
 
+function normalizeCity(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
 /**
  * Same behaviour as Delivery Sheet "add consignment": active sheet per CN, booking → in-transit.
  * @param {string} riderId
@@ -37,6 +43,17 @@ async function assignConsignmentToRider(riderId, consignmentNumber, options = {}
     manualBooking = await ManualBooking.findOne({ consignmentNo: cn });
     if (!manualBooking) {
       return { success: false, statusCode: 404, message: "Consignment number not found in booking system" };
+    }
+  }
+
+  const destCity = booking ? booking.destinationCity : manualBooking?.destinationCity;
+  if (rider.city && destCity && String(rider.city).trim() && String(destCity).trim()) {
+    if (normalizeCity(rider.city) !== normalizeCity(destCity)) {
+      return {
+        success: false,
+        statusCode: 400,
+        message: `Rider is assigned to ${String(rider.city).trim()} — parcel destination is ${String(destCity).trim()}`
+      };
     }
   }
 

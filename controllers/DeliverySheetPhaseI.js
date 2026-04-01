@@ -75,11 +75,18 @@ function attachBookingsToSheetDocs(sheetDocs, bookingMap) {
   });
 }
 
-// Get all active riders for selection
+// Get all active riders for selection (optional ?city= or ?destinationCity= to match parcel destination)
 const getActiveRiders = async (req, res) => {
   try {
-    const riders = await Rider.find({ active: true })
-      .select('riderName riderCode mobileNo')
+    const cityFilter = req.query.city || req.query.destinationCity;
+    const query = { active: true };
+    if (cityFilter && String(cityFilter).trim()) {
+      const escaped = String(cityFilter).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      query.city = new RegExp(`^${escaped}$`, 'i');
+    }
+
+    const riders = await Rider.find(query)
+      .select('riderName riderCode mobileNo city')
       .sort({ riderName: 1 });
 
     res.status(200).json({

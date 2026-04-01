@@ -810,8 +810,15 @@ exports.getAvailableAgents = async (req, res) => {
 // Get available riders for invoice generation
 exports.getAvailableRiders = async (req, res) => {
     try {
-        const riders = await Rider.find({ active: true })
-            .select('riderCode riderName mobileNo address')
+        const cityFilter = req.query.city || req.query.destinationCity;
+        const query = { active: true };
+        if (cityFilter && String(cityFilter).trim()) {
+            const escaped = String(cityFilter).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            query.city = new RegExp(`^${escaped}$`, 'i');
+        }
+
+        const riders = await Rider.find(query)
+            .select('riderCode riderName mobileNo address city')
             .sort({ riderName: 1 });
 
         const riderList = riders.map(rider => ({
@@ -819,7 +826,8 @@ exports.getAvailableRiders = async (req, res) => {
             riderCode: rider.riderCode,
             name: rider.riderName,
             mobileNo: rider.mobileNo,
-            address: rider.address
+            address: rider.address,
+            city: rider.city
         }));
 
         res.status(200).json({
