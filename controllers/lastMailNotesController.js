@@ -328,6 +328,90 @@ async function loadBookingMapForCns(cns) {
 }
 
 /**
+ * Flattened CN row for UI parity with Last Mail receive note (live booking preferred, else scan snapshot).
+ */
+function buildConsignmentAsReceiveNote(scan, row, sourceResolved) {
+  const source = sourceResolved != null ? sourceResolved : scan?.source;
+  const cnFromScan = normalizeCn(scan?.consignmentNumber);
+
+  if (!row) {
+    return {
+      hasLiveBooking: false,
+      consignmentNumber: cnFromScan,
+      consigneeName: scan?.consigneeName ?? null,
+      consigneeMobile: null,
+      consigneeAddress: null,
+      consigneeEmail: null,
+      destinationCity: scan?.destinationCity ?? null,
+      originCity: null,
+      codAmount: scan?.codAmount != null ? scan.codAmount : 0,
+      weight: scan?.weight != null ? scan.weight : null,
+      pieces: null,
+      status: null,
+      trackingStage: null,
+      bookingDate: null,
+      remarks: null,
+      referenceNo: null,
+      accountNo: null,
+      agentName: null,
+      serviceType: null,
+      productDetail: null,
+      source
+    };
+  }
+
+  const consignmentNumber = normalizeCn(row.consignmentNumber || row.consignmentNo || cnFromScan);
+
+  return {
+    hasLiveBooking: true,
+    consignmentNumber,
+    consigneeName: row.consigneeName ?? scan?.consigneeName ?? null,
+    consigneeMobile: row.consigneeMobile ?? null,
+    consigneeAddress: row.consigneeAddress ?? null,
+    consigneeEmail: row.consigneeEmail ?? null,
+    destinationCity: row.destinationCity ?? scan?.destinationCity ?? null,
+    originCity: row.originCity ?? null,
+    codAmount: row.codAmount != null ? row.codAmount : scan?.codAmount != null ? scan.codAmount : 0,
+    weight: row.weight != null ? row.weight : scan?.weight != null ? scan.weight : null,
+    pieces: row.pieces != null ? row.pieces : null,
+    status: row.status ?? null,
+    trackingStage: row.trackingStage ?? null,
+    bookingDate: row.bookingDate ?? row.date ?? null,
+    remarks: row.remarks ?? null,
+    referenceNo: row.referenceNo ?? row.customerReferenceNo ?? null,
+    accountNo: row.accountNo ?? null,
+    agentName: row.agentName ?? null,
+    serviceType: row.serviceType ?? null,
+    productDetail: row.productDetail ?? null,
+    source: sourceResolved ?? (row.consignmentNumber ? "booking_status" : "manual_booking")
+  };
+}
+
+/**
+ * Same shape for delivery-note detail and receive-note detail: live booking per line + stats.
+ * @param {object} note — lean note with `entries`
+ */
+async function buildEnrichedNoteEntryDetails(note) {
+  const entries = await Promise.all(
+    (note.entries || []).map(async (e) => {
+      const { source, row } = await getBookingRowForCn(e.consignmentNumber);
+      const sheetStatus = e.receivingSheetStatus && String(e.receivingSheetStatus).trim();
+      return {
+        scan: e,
+        consignmentNumber: normalizeCn(e.consignmentNumber),
+        consignmentAsReceiveNote: buildConsignmentAsReceiveNote(e, row, source),
+        currentBooking: row,
+        source,
+        receivingStatus: sheetStatus || null
+      };
+    })
+  );
+  const bookingByCn = await loadBookingMapForCns((note.entries || []).map((x) => x.consignmentNumber));
+  const stats = computeNoteStatsFromEntries(note.entries || [], bookingByCn);
+  return { entries, stats };
+}
+
+/**
  * CNs for create-in-one-step: `consignmentNumbers` (array), or string split by comma/space/semicolon,
  * plus optional `scanBar` (same splitting). Order preserved; duplicates removed.
  */
@@ -462,11 +546,21 @@ exports.createDeliveryNote = async (req, res) => {
     for (const cn of initialCns) {
       const result = await scanConsignmentOntoNoteDocument(note, cn, req);
       if (!result.success) {
+        // Avoid leaving an empty "open" DN when the first (or only) scan fails (e.g. CN on another rider).
+        const saved = await LastMailDeliveryNote.findById(note._id).lean();
+        const hasEntries = saved && Array.isArray(saved.entries) && saved.entries.length > 0;
+        if (!hasEntries) {
+          await LastMailDeliveryNote.findByIdAndDelete(note._id);
+        }
         return res.status(result.statusCode).json({
           success: false,
           message: result.message,
           failedConsignment: cn,
-          data: { note, ...(result.meta || {}) }
+          data: {
+            ...(hasEntries ? { note: saved } : {}),
+            noteRemoved: !hasEntries,
+            ...(result.meta || {})
+          }
         });
       }
     }
@@ -616,11 +710,24 @@ exports.getDeliveryNoteById = async (req, res) => {
     if (!assertRole(req)) {
       return res.status(403).json({ success: false, message: "Access denied" });
     }
-    const note = await LastMailDeliveryNote.findById(req.params.id);
+    const note = await LastMailDeliveryNote.findById(req.params.id)
+      .populate("riderId", "riderName riderCode mobileNo active address cnicNo city")
+      .lean();
     if (!note) {
       return res.status(404).json({ success: false, message: "Note not found" });
     }
-    return res.status(200).json({ success: true, data: note });
+
+    const { entries: enrichedEntries, stats } = await buildEnrichedNoteEntryDetails(note);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        note,
+        rider: note.riderId || null,
+        stats,
+        entries: enrichedEntries
+      }
+    });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Server error", error: error.message });
   }
@@ -859,26 +966,7 @@ exports.getReceiveNoteDetail = async (req, res) => {
       return res.status(404).json({ success: false, message: "Note not found" });
     }
 
-    const entryDetails = await Promise.all(
-      (note.entries || []).map(async (e) => {
-        const { source, row } = await getBookingRowForCn(e.consignmentNumber);
-        const sheetStatus = e.receivingSheetStatus && String(e.receivingSheetStatus).trim();
-        return {
-          scan: e,
-          consignmentNumber: normalizeCn(e.consignmentNumber),
-          currentBooking: row,
-          source,
-          /**
-           * Receive DN sheet / PDF "Receiving" column — only set after receive-note status update endpoint.
-           * Null until then (leave cell empty for signature; do not use booking status in this column).
-           */
-          receivingStatus: sheetStatus || null
-        };
-      })
-    );
-
-    const bookingByCn = await loadBookingMapForCns((note.entries || []).map((x) => x.consignmentNumber));
-    const stats = computeNoteStatsFromEntries(note.entries || [], bookingByCn);
+    const { entries: enrichedEntries, stats } = await buildEnrichedNoteEntryDetails(note);
 
     return res.status(200).json({
       success: true,
@@ -886,7 +974,7 @@ exports.getReceiveNoteDetail = async (req, res) => {
         note,
         rider: note.riderId || null,
         stats,
-        entries: entryDetails
+        entries: enrichedEntries
       }
     });
   } catch (error) {
